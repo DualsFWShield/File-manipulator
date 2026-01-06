@@ -5,12 +5,15 @@ import { GlitchEffect } from './effects/GlitchEffect.js';
 import { HalftoneEffect } from './effects/HalftoneEffect.js';
 import { Recorder } from './utils/Recorder.js';
 import { Animator } from './animator/Animator.js';
+import { VideoExporter } from './utils/VideoExporter.js';
 
 export class ImageProcessor {
     constructor(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
+        this.ctx = canvas.getContext('2d', { willReadFrequently: true });
         this.originalImage = null;
+        this.videoElement = null;
+        this.sourceType = 'image'; // image | video
 
         this.ui = new UIBuilder('modules-rack');
 
@@ -32,32 +35,69 @@ export class ImageProcessor {
 
         // Recorder & Animator
         this.recorder = new Recorder(this.canvas);
+        this.videoExporter = new VideoExporter();
+        this.exportFormat = 'webm'; // Default
         this.animator = null; // Instantiated on load to access UI
     }
 
     loadImage(file) {
+        this.sourceType = 'image';
+        if (this.videoElement) {
+            this.videoElement.pause();
+            this.videoElement = null; // Cleanup
+        }
+
         const reader = new FileReader();
         reader.onload = (e) => {
             const img = new Image();
             img.onload = () => {
                 this.originalImage = img;
                 this.setupPreview(img);
-
-                // UI & Animation
-                this.generateUI();
-                if (!this.animator) this.animator = new Animator(this);
-                else this.animator.setupUI(); // Re-add animation controls to new UI
-
-                // FORCE INITIAL STATE SYNC:
-                this.requestRender();
-
-                // Enable Controls
-                document.getElementById('export-btn').disabled = false;
-                this.setupRefreshedControls();
+                this.initSystem();
             };
             img.src = e.target.result;
         };
         reader.readAsDataURL(file);
+    }
+
+    loadVideo(file) {
+        this.sourceType = 'video';
+        this.originalImage = null; // Cleanup image
+
+        const url = URL.createObjectURL(file);
+
+        if (this.videoElement) {
+            this.videoElement.pause();
+            this.videoElement.src = "";
+        }
+        this.videoElement = document.createElement('video');
+        this.videoElement.src = url;
+        this.videoElement.muted = true; // Auto-play requires mute often
+        this.videoElement.loop = true;
+        this.videoElement.playsInline = true;
+
+        this.videoElement.onloadedmetadata = () => {
+            this.setupPreview({ width: this.videoElement.videoWidth, height: this.videoElement.videoHeight });
+            this.initSystem();
+
+            // Auto Play
+            this.videoElement.play();
+            this.renderVideo();
+        };
+    }
+
+    initSystem() {
+        // UI & Animation
+        this.generateUI();
+        if (!this.animator) this.animator = new Animator(this);
+        else this.animator.setupUI(); // Re-add animation controls
+
+        // Controls
+        document.getElementById('export-btn').disabled = false;
+        this.setupRefreshedControls();
+
+        // Initial Render
+        this.requestRender();
     }
 
     setupRefreshedControls() {
@@ -78,6 +118,40 @@ export class ImageProcessor {
         const videoFull = this.createBtn('VID FULL RES', 'video-full-btn', () => this.exportVideo(true, videoFull));
         const videoQuick = this.createBtn('VID QUICK', 'video-quick-btn', () => this.exportVideo(false, videoQuick));
 
+        // Video Controls (If Video Mode)
+        if (this.sourceType === 'video') {
+            const togglePlay = this.createBtn('PAUSE', 'vid-toggle-btn', (e) => {
+                if (this.videoElement.paused) {
+                    this.videoElement.play();
+                    this.renderVideo();
+                    e.target.textContent = "PAUSE";
+                } else {
+                    this.videoElement.pause();
+                    e.target.textContent = "PLAY";
+                }
+            });
+            header.insertBefore(togglePlay, exportMain);
+
+            // Format Selection Dropdown
+            const formatSelect = document.createElement('select');
+            formatSelect.id = 'format-select';
+            formatSelect.className = 'btn btn-secondary'; // Recycle btn style
+            formatSelect.style.marginLeft = '10px';
+            formatSelect.style.padding = '5px';
+            formatSelect.style.background = 'var(--bg-panel)';
+
+            ['webm', 'gif'].forEach(fmt => {
+                const opt = document.createElement('option');
+                opt.value = fmt;
+                opt.text = fmt.toUpperCase();
+                formatSelect.appendChild(opt);
+            });
+            formatSelect.onchange = (e) => { this.exportFormat = e.target.value; };
+            formatSelect.value = this.exportFormat; // Set initial value
+
+            header.insertBefore(formatSelect, exportMain);
+        }
+
         // Insert in order: VID QUICK | VID FULL | IMG QUICK | [IMG FULL (Existing)]
         header.insertBefore(videoQuick, exportMain);
         header.insertBefore(videoFull, exportMain);
@@ -95,51 +169,53 @@ export class ImageProcessor {
     }
 
     async exportVideo(isFullRes, btn) {
-        // NOTE: True Full Res Video would require rendering frames to a hidden high-res canvas.
-        // For now, "VID FULL RES" will try to use a larger canvas if possible, or just be a marker.
-        // Given performance, let's use the current canvas but maybe we can resize it temporarily? 
-        // No, resizing canvas clears it and breaks stream. 
-        // For this V1, let's treat both as recording the current stream, but maybe Future: Full Res = Frame by Frame.
+        if (this.sourceType !== 'video' || !this.videoElement) return;
 
-        if (this.recorder.isRecording) {
-            // STOP RECORDING
-            const blob = await this.recorder.stop();
+        // Prevent double click
+        if (this.videoExporter.isProcessing) return;
 
-            // Clean up button state
-            this.updateProgress(btn, 0, btn.dataset.originalText || "VID EXPORT");
-            btn.classList.remove('recording-active');
-            if (this.recInterval) clearInterval(this.recInterval);
+        // UI Feedback
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "INITIALIZING...";
+        btn.classList.add('recording-active');
 
+        try {
+            const fmt = this.exportFormat || 'webm';
+            const blob = await this.videoExporter.render(
+                this,
+                this.videoElement,
+                (percent, text) => this.updateProgress(btn, percent, text),
+                isFullRes,
+                fmt
+            );
+
+            // Download
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `VOID_VIDEO_${isFullRes ? 'FULL' : 'QUICK'}_${Date.now()}.webm`;
+            a.download = `VOID_VIDEO_FX_${isFullRes ? 'FULL' : 'QUICK'}_${Date.now()}.${fmt}`;
             a.click();
+            URL.revokeObjectURL(url);
 
-        } else {
-            // START RECORDING
-            btn.dataset.originalText = btn.textContent;
-            btn.textContent = "STOP RECORDING";
-            btn.classList.add('recording-active');
+        } catch (err) {
+            console.error("Export Failed", err);
+            alert("Video Export Failed: " + err.message);
+        } finally {
+            // Restore UI
+            btn.textContent = originalText;
+            btn.style.background = '';
+            btn.disabled = false;
+            btn.classList.remove('recording-active');
 
-            this.recorder.start();
-
-            // Visual Progress (Infinite Loop Effect)
-            let p = 0;
-            this.recInterval = setInterval(() => {
-                if (!this.recorder.isRecording) {
-                    clearInterval(this.recInterval);
-                    return;
-                }
-                p += 2; // Slow fill
-                if (p > 100) p = 0;
-                this.updateProgress(btn, p, "RECORDING...");
-            }, 100);
+            // Resume play if was playing?
+            this.videoElement.play();
+            this.renderVideo();
         }
     }
 
     updateProgress(btn, percent, text) {
-        btn.textContent = text;
+        btn.textContent = text || `${Math.round(percent)}%`;
         btn.style.background = `linear-gradient(90deg, var(--accent-primary) ${percent}%, var(--bg-surface) ${percent}%)`;
     }
 
@@ -185,7 +261,8 @@ export class ImageProcessor {
         // Debounce 30ms for responsiveness
         this.renderTimeout = setTimeout(() => {
             requestAnimationFrame(() => {
-                this.render();
+                if (this.sourceType === 'video') this.renderVideo();
+                else this.render();
                 this.toggleLoading(false);
             });
         }, 30);
@@ -236,7 +313,26 @@ export class ImageProcessor {
         });
     }
 
+    renderVideo() {
+        if (!this.videoElement || this.videoElement.paused || this.videoElement.ended) return;
+
+        // Draw Video Frame
+        this.ctx.drawImage(this.videoElement, 0, 0, this.canvas.width, this.canvas.height);
+
+        // Run Pipeline
+        this.pipeline.forEach(effect => {
+            effect.process(this.ctx, this.canvas.width, this.canvas.height, this.state[effect.id], 1.0);
+        });
+
+        // Loop
+        requestAnimationFrame(() => this.renderVideo());
+    }
+
     exportResult(usePreviewRes = false) {
+        if (this.sourceType === 'video') {
+            alert("For video, use 'VID QUICK' or 'VID FULL RES' buttons!");
+            return;
+        }
         if (!this.originalImage) return;
 
         let w, h, exportScale;

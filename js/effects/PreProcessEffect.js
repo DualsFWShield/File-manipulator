@@ -190,7 +190,7 @@ export const PreProcessEffect = {
             const temp = document.createElement('canvas');
             temp.width = width;
             temp.height = height;
-            const tCtx = temp.getContext('2d');
+            const tCtx = temp.getContext('2d', { willReadFrequently: true });
 
             // Draw current state (Original)
             tCtx.drawImage(ctx.canvas, 0, 0);

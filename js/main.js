@@ -112,7 +112,6 @@ function handleFile(file) {
         initAudioMode(file);
     } else if (file.type.startsWith('video/')) {
         initVideoMode(file); // Future implementation
-        alert("Video support is incoming in future updates.");
     } else {
         alert("Unsupported file type.");
     }
@@ -170,7 +169,25 @@ function initAudioMode(file) {
 }
 
 function initVideoMode(file) {
-    // Placeholder
+    STATE.type = 'video';
+    activeToolStatus.textContent = "VIDEO_PROCESSOR_V1";
+
+    // Hide upload prompt
+    document.querySelector('.upload-prompt').hidden = true;
+    document.getElementById('main-canvas').hidden = false;
+    document.getElementById('audio-visualizer').hidden = true;
+
+    console.log("Initializing Video Processor (via ImageProcessor core)...");
+
+    // Cleanup previous processor
+    if (STATE.activeProcessor && STATE.activeProcessor.stop) {
+        // Stop audio if running
+    }
+
+    // Reuse ImageProcessor but in Video Mode
+    STATE.activeProcessor = new ImageProcessor(document.getElementById('main-canvas'));
+    STATE.activeProcessor.loadVideo(file);
+    document.getElementById('export-btn').style.display = 'inline-block';
 }
 
 // === Utilities ===
