@@ -6,10 +6,20 @@ export class AudioProcessor {
         this.source = null;
         this.scriptNode = null;
         this.gainNode = null;
+        this.distortionNode = null;
+        this.filterNode = null;
+        this.noiseNode = null;
+        this.noiseGainNode = null;
+
         this.buffer = null;
         this.ui = new UIBuilder('modules-rack');
 
         this.params = {
+            speed: 1.0,
+            noise: 0.0,
+            saturation: 0.0,
+            cutoff: 20000,
+            resonance: 0,
             bits: 8,
             normFreq: 0.5,
             gain: 0.8
@@ -19,6 +29,20 @@ export class AudioProcessor {
         this.isPaused = false;
         this.startTime = 0;
         this.pauseTime = 0;
+
+        // Generate Noise Buffer Once
+        this.noiseBuffer = this.createNoiseBuffer();
+    }
+
+    createNoiseBuffer() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const bufferSize = ctx.sampleRate * 2; // 2 seconds loop
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        return buffer;
     }
 
     loadAudio(file) {
@@ -90,6 +114,37 @@ export class AudioProcessor {
         exportBtn.style.position = 'relative'; // For progress fill if needed
         exportBtn.onclick = () => this.exportOffline(exportBtn);
         master.content.appendChild(exportBtn);
+
+        // --- NOISE & DISTORTION ---
+        const distGroup = this.ui.createModuleGroup("NOISE & DISTORTION");
+
+        distGroup.addSlider("NOISE LVL", 0, 0.5, this.params.noise, 0.01, (v) => {
+            this.params.noise = v;
+            if (this.noiseGainNode) this.noiseGainNode.gain.value = v;
+        });
+
+        distGroup.addSlider("SATURATION", 0, 1.0, this.params.saturation, 0.01, (v) => {
+            this.params.saturation = v;
+            if (this.distortionNode) this.distortionNode.curve = this.makeDistortionCurve(v * 100);
+        });
+
+        distGroup.addSlider("PLAYBACK SPEED", 0.1, 2.0, this.params.speed, 0.1, (v) => {
+            this.params.speed = v;
+            if (this.source && this.source.playbackRate) this.source.playbackRate.value = v;
+        });
+
+        // --- FILTER ---
+        const filterGroup = this.ui.createModuleGroup("FILTER (LOWPASS)");
+
+        filterGroup.addSlider("CUTOFF (Hz)", 20, 20000, this.params.cutoff, 100, (v) => {
+            this.params.cutoff = v;
+            if (this.filterNode) this.filterNode.frequency.value = v;
+        });
+
+        filterGroup.addSlider("RESONANCE", 0, 20, this.params.resonance, 0.5, (v) => {
+            this.params.resonance = v;
+            if (this.filterNode) this.filterNode.Q.value = v;
+        });
 
         // --- BITCRUSHER ---
         const group = this.ui.createModuleGroup("BITCRUSHER CORE");
@@ -165,11 +220,41 @@ export class AudioProcessor {
     }
 
     setupGraph(ctx, sourceNode, destination) {
-        // Re-create script node every time? Yes.
+        // NODES CREATION
+
+        // 1. Mixer Nodes
+        const preMix = ctx.createGain(); // Summing point
+
+        // Noise Branch
+        this.noiseNode = ctx.createBufferSource();
+        this.noiseNode.buffer = this.noiseBuffer;
+        this.noiseNode.loop = true;
+        this.noiseGainNode = ctx.createGain();
+        this.noiseGainNode.gain.value = this.params.noise;
+        this.noiseNode.connect(this.noiseGainNode);
+        this.noiseGainNode.connect(preMix);
+        // Start Noise immediately (controlled by gain, but sync start is better in play())
+        try { this.noiseNode.start(0); } catch (e) { }
+
+        // Main Source Connection
+        sourceNode.connect(preMix);
+        // Apply Speed
+        if (sourceNode.playbackRate) sourceNode.playbackRate.value = this.params.speed;
+
+        // 2. Distortion
+        this.distortionNode = ctx.createWaveShaper();
+        this.distortionNode.curve = this.makeDistortionCurve(this.params.saturation * 100); // 0-100 amount
+        this.distortionNode.oversample = '4x';
+
+        // 3. Filter
+        this.filterNode = ctx.createBiquadFilter();
+        this.filterNode.type = 'lowpass';
+        this.filterNode.frequency.value = this.params.cutoff;
+        this.filterNode.Q.value = this.params.resonance;
+
+        // 4. Bitcrusher (ScriptProcessor)
         const bufferSize = 4096;
         this.scriptNode = ctx.createScriptProcessor(bufferSize, 1, 1);
-
-        // Bitcrusher Logic
         this.scriptNode.onaudioprocess = (e) => {
             const input = e.inputBuffer.getChannelData(0);
             const output = e.outputBuffer.getChannelData(0);
@@ -190,12 +275,34 @@ export class AudioProcessor {
             }
         };
 
+        // 5. Master Gain
         this.gainNode = ctx.createGain();
         this.gainNode.gain.value = this.params.gain;
 
-        sourceNode.connect(this.scriptNode);
+        // CONNECTIONS: PreMix -> Distortion -> Filter -> Bitcrush -> Gain -> Dest
+        preMix.connect(this.distortionNode);
+        this.distortionNode.connect(this.filterNode);
+        this.filterNode.connect(this.scriptNode);
         this.scriptNode.connect(this.gainNode);
         this.gainNode.connect(destination);
+    }
+
+    makeDistortionCurve(amount) {
+        const k = typeof amount === 'number' ? amount : 50;
+        const n_samples = 44100;
+        const curve = new Float32Array(n_samples);
+        const deg = Math.PI / 180;
+
+        if (amount === 0) {
+            for (let i = 0; i < n_samples; ++i) curve[i] = (i * 2) / n_samples - 1;
+            return curve; // Linear
+        }
+
+        for (let i = 0; i < n_samples; ++i) {
+            const x = (i * 2) / n_samples - 1;
+            curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
+        }
+        return curve;
     }
 
     async exportOffline(btn) {
