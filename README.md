@@ -1,6 +1,6 @@
 # VOID - Multimedia Manipulation Suite
 
-**VOID** is a browser-based, offline-first creative tool for applying retro, glitch, and aesthetic effects to Images and Audio. Built with the "0$ Stack" philosophy: Vanilla JavaScript, HTML5, and CSS3. No servers, no subscriptions, no build steps.
+**VOID** is a browser-based, offline-first creative tool for applying retro, glitch, and aesthetic effects to Images, Textures, Videos, and Audio. Built with the "0$ Stack" philosophy: Vanilla JavaScript, HTML5, and CSS3. No servers, no subscriptions, no build steps.
 
 ## 🎛️ CORE FEATURES
 
@@ -11,14 +11,14 @@
 
 ---
 
-## 🖼️ IMAGE PROCESSOR (V1)
+## 🖼️ IMAGE & VIDEO PROCESSOR (V1)
 
-A complete non-destructive pipeline for texture generation and aesthetic rendering.
+A complete non-destructive pipeline for texture generation, aesthetic rendering, and video processing.
 
 ### 1. Pre-Processing (Preparation)
 Prepare your image before destruction.
 *   **Levels**: Full control over Black Point, White Point, and Gamma.
-*   **Color Grading**: Adjust Saturation and Brightness.
+*   **Color Grading**: Adjust Saturation, Brightness, and Hue Shift.
 *   **Detail**:
     *   **Blur**: Smooth out details before dithering.
     *   **Sharpen**: Enhance edges.
@@ -30,24 +30,21 @@ Simulate CMYK offset printing imperfections.
 *   **CMYK Angles**: Custom rotation for Cyan, Magenta, Yellow, and Black channels.
 *   **Opacity**: Blend the halftone effect with the original image.
 
-### 3. Dither & Tone Engine (The Core)
+### 3. Dither & Tone Engine (V1.5)
 Quantize colors and apply retro shading patterns.
+*   **Render Modes**:
+    *   **TONAL (Luminance Map)**: Map brightness to 3 custom colors (Shadow, Midtone, Highlight).
+    *   **GRADE (Color Palette)**: Quantize colors to specific palettes.
 *   **Algorithms**:
     *   *Floyd-Steinberg* (Smooth diffusion)
     *   *Atkinson* (High contrast, Macintosh style)
     *   *Sierra Lite* (Fast, structured)
-    *   *Bayer 4x4* & *Bayer 8x8* (Ordered grid patterns)
-*   **Palettes**:
-    *   **Full RGB**: Dither without losing color.
-    *   **1-Bit B/W**: Pure Black & White threshold.
-    *   **Gameboy**: Classic 4-green tints.
-    *   **CGA**: Cyan/Magenta retro palette.
-    *   **Sepia / Night Vision**: Stylized monochromatic looks.
-    *   **Custom Tonal (NEW)**: Define your own **Shadow** and **Highlight** colors for true duotone branding.
-*   **Controls**:
-    *   **Resolution**: Downscale/Pixelate slider.
-    *   **Contrast**: Hard contrast adjustment pre-dither.
-    *   **Force Grayscale**: Override color palettes.
+    *   *Bayer 4x4* & *8x8* (Ordered grid patterns)
+    *   *Modulation* (Sine wave bands)
+    *   *Stitched* (Cross-stitch fabric pattern)
+*   **Advanced Controls**:
+    *   **Spread**: Bias the dithering threshold.
+    *   **Knockout**: Make background transparent.
 
 ### 4. Glitch / Corruption
 Digital signal destruction.
@@ -57,7 +54,19 @@ Digital signal destruction.
 
 ---
 
-## 🔊 AUDIO CRUSHER (V1)
+## �️ VIDEO & GIF SUPPORT
+
+Apply the entire Image Processor pipeline to moving pictures.
+*   **Formats**: Supports `.mp4` and `.gif` input.
+*   **Playback**: Loop with Play / Pause controls.
+*   **Frame-by-Frame Export**: 
+    *   **WebM (VP9)**: High-quality, smooth 30 FPS export.
+    *   **GIF**: Quantized 15 FPS export (256 colors).
+    *   **Offline Rendering**: The system pauses playback and renders every frame sequentially, ensuring perfect fluidity regardless of your computer's speed.
+
+---
+
+## �🔊 AUDIO PROCESSOR (V2)
 
 A dedicated deck for audio destruction and format conversion.
 
@@ -65,14 +74,20 @@ A dedicated deck for audio destruction and format conversion.
 *   **Playback**: Complete Play / Pause / Stop controls.
 *   **Visualizer**: Real-time frequency bar graph.
 
-### Effects
-*   **Bitcrusher**: Reduce Bit Depth (1-16 bits) for crunchy, lo-fi textures.
-*   **Sample Rate**: Reduce frequency for "underwater" or "telephone" artifacts.
-*   **Gain**: Master output volume.
+### Effects Chain
+(Signal flows top to bottom)
+1.  **Noise**: Additive White Noise generator with gain control.
+2.  **Speed**: Playback rate / pitch control (0.1x - 2.0x).
+3.  **Distortion**: Sigmoid wave shaper for aggressive saturation/overdrive.
+4.  **Filter**: Resonant Lowpass Filter (Cutoff Hz & Resonance).
+5.  **Bitcrusher**: 
+    *   **Bit Depth**: 1-16 bits (Lo-fi crunch).
+    *   **Sample Rate**: Frequency decimation (Aliasing artifacts).
+6.  **Gain**: Master output volume.
 
 ### Export
-*   **Offline Rendering**: Does not require real-time playback. Renders the effect to a **.WAV** file instantly.
-*   **Progress Indicator**: Button fills to show export status.
+*   **Offline Rendering**: Renders the complete effect chain to a **.WAV** file instantly.
+*   **Progress Indicator**: Visual feedback during processing.
 
 ---
 
@@ -81,21 +96,24 @@ A dedicated deck for audio destruction and format conversion.
 Robust tools for getting your creations out.
 
 ### Image Export
-*   **IMG QUICK**: instantly save the implementation of the preview canvas (960px max).
-*   **IMG FULL RES**: Re-process the original source file at **Original Resolution** with properly scaled effects (Dots and Glitches scale with resolution).
+*   **IMG QUICK**: instantly save the implementation of the preview canvas.
+*   **IMG FULL RES**: Re-process the original source file at **Original Resolution**.
 
-### Video Export
-*   **REC / STOP Strategy**: Record infinite animations.
-*   **VID QUICK**: Record the screen preview to WebM.
-*   **VID FULL**: Record high-quality stream (WebM).
-*   **Visual Feedback**: Buttons display "RECORDING..." animation during capture.
+### Video / GIF Export
+Select your format via the dropdown: **[WEBM | GIF]**.
+*   **VID QUICK**: Render at preview resolution.
+*   **VID FULL RES**: Render at source video resolution (if possible) or high-quality canvas.
+*   **Process**: Buttons show "RENDERING [FORMAT] frame X/Y..." during background export.
 
 ---
 
 ## 🛠️ TECH STACK
 *   **Language**: Vanilla ES6+ JavaScript.
-*   **Style**: CSS Variables, Flexbox/Grid (No Frameworks).
-*   **Audio**: Web Audio API (ScriptProcessor & OfflineAudioContext).
+*   **Libraries (via CDN)**: 
+    *   `webm-muxer` (WebM assembly)
+    *   `gifenc` (GIF encoding)
+*   **Audio**: Web Audio API (Nodes & OfflineContext).
+*   **Video**: WebCodecs API (VideoEncoder).
 *   **Storage**: Browser Memory (Zero Persistence).
 
-> **Note**: This software is intended for creative exploration. High-resolution exports of >50MP images may require significant RAM.
+> **Note**: This software is intended for creative exploration. High-resolution exports or long videos may require significant RAM.
