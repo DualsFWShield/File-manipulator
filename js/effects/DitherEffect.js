@@ -129,6 +129,142 @@ export const DitherEffect = {
         ctx.imageSmoothingEnabled = false;
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(tempCanvas, 0, 0, width, height);
+    },
+
+    // --- GPU Support (Only supports Bayer/Ordered/Modulation) ---
+    // If Algorithm is Floyd/Atkinson, we must separate or use CPU fallback.
+    isGPUSupported: (params) => {
+        const algo = params.algorithm;
+        return (algo === 'none' || algo.startsWith('bayer') || algo === 'modulation' || algo === 'stitched');
+    },
+
+    shaderSource: `#version 300 es
+    precision mediump float;
+    
+    in vec2 v_uv;
+    uniform sampler2D u_image;
+    uniform vec2 u_resolution; // Canvas size
+    uniform float u_pixelScale; // Resolution factor (0.05 - 1.0)
+    
+    // Params
+    uniform int u_mode; // 0=Tonal, 1=Grade
+    uniform vec3 u_palLow;
+    uniform vec3 u_palMid;
+    uniform vec3 u_palHigh;
+
+    uniform float u_contrast;
+    uniform float u_spread;
+    uniform int u_algo; // 0=None, 1=Bayer4, 2=Bayer8, 3=Modulation, 4=Stitched
+
+    out vec4 outColor;
+
+    // Bayer Matrices (Hardcoded)
+    float bayer4(vec2 uv) {
+        int x = int(mod(uv.x, 4.0));
+        int y = int(mod(uv.y, 4.0));
+        int idx = y * 4 + x;
+        // 0-15 map
+        float m = 0.0;
+        if (idx == 0) m = 0.0; else if (idx == 1) m = 8.0; else if (idx == 2) m = 2.0; else if (idx == 3) m = 10.0;
+        if (idx == 4) m = 12.0; else if (idx == 5) m = 4.0; else if (idx == 6) m = 14.0; else if (idx == 7) m = 6.0;
+        if (idx == 8) m = 3.0; else if (idx == 9) m = 11.0; else if (idx == 10) m = 1.0; else if (idx == 11) m = 9.0;
+        if (idx == 12) m = 15.0; else if (idx == 13) m = 7.0; else if (idx == 14) m = 13.0; else if (idx == 15) m = 5.0;
+        return m / 16.0;
+    }
+
+    // ApproximatedBayer8 (Too large to switch-case, use texture or simple recursive math? 
+    // Just use Bayer4 repeatedly or Modulation for speed. Let's stick to Bayer4 for V1 GPU)
+    
+    float stitched(vec2 uv) {
+        int x = int(mod(uv.x, 4.0));
+        int y = int(mod(uv.y, 4.0));
+        float m = 4.0;
+        if ((x==0 && y==1) || (x==2 && y==3)) m = 0.0; // Pattern approx
+        // ... simplified logic from js:
+        // mapStitch = [[4,0,4,0],[0,4,0,4]...]
+        // (m - 2) * 10 
+        
+        bool evenRow = (int(mod(float(y), 2.0)) == 0);
+        bool evenCol = (int(mod(float(x), 2.0)) == 0);
+        
+        if (evenRow == evenCol) m = 4.0; else m = 0.0;
+        
+        return ((m - 2.0)/2.0); // -1 to 1
+    }
+
+    vec3 rgb2rgb(vec3 c) { return c; }
+
+    void main() {
+        // Pixelate Coords
+        vec2 dims = u_resolution * u_pixelScale;
+        vec2 pixUV = floor(v_uv * dims) / dims;
+        
+        // Pixel Coord (Screen space for dither pattern)
+        vec2 p = v_uv * dims;
+        
+        vec4 color = texture(u_image, pixUV);
+        vec3 c = color.rgb;
+
+        // Contrast
+        if (u_contrast != 0.0) {
+            float f = (259.0 * (u_contrast + 255.0)) / (255.0 * (259.0 - u_contrast));
+            c = clamp(f * (c - 0.5) + 0.5, 0.0, 1.0);
+        }
+
+        // Bias
+        float bias = 0.0;
+        if (u_algo == 1) { // Bayer4
+            bias = (bayer4(p) - 0.5) * u_spread; 
+        } else if (u_algo == 3) { // Modulation
+            bias = (sin(p.x * 0.5) * cos(p.y * 0.5)) * 0.1 * u_spread;
+        } else if (u_algo == 4) { // Stitched
+           bias = stitched(p) * 0.1 * u_spread;
+        }
+
+        c += bias;
+        c = clamp(c, 0.0, 1.0);
+
+        // Map
+        if (u_mode == 0) { // Tonal
+            float luma = dot(c, vec3(0.299, 0.587, 0.114));
+            
+            vec3 final;
+            if (luma < 0.5) {
+                final = mix(u_palLow, u_palMid, luma * 2.0);
+            } else {
+                final = mix(u_palMid, u_palHigh, (luma - 0.5) * 2.0);
+            }
+            outColor = vec4(final, 1.0);
+        } else {
+             // Grade
+             outColor = vec4(c, 1.0);
+        }
+    }`,
+
+    getUniforms: (params, width, height, scaleFactor = 1.0) => {
+        let algo = 0;
+        if (params.algorithm === 'bayer4') algo = 1;
+        if (params.algorithm === 'bayer8') algo = 1; // Fallback to 4 for now in GPU
+        if (params.algorithm === 'modulation') algo = 3;
+        if (params.algorithm === 'stitched') algo = 4;
+
+        // Hex to Vec3 0-1
+        const toVec = (hex) => {
+            const rgb = hexToRgb(hex);
+            return [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255];
+        };
+
+        return {
+            u_resolution: [width, height],
+            u_pixelScale: params.resolution, // This is technically 1.0 usually? No params.resolution acts as Downscale factor.
+            u_contrast: params.contrast,
+            u_spread: params.spread,
+            u_mode: params.renderMode === 'tonal' ? 0 : 1,
+            u_palLow: toVec(params.colorShadow),
+            u_palMid: toVec(params.colorMid),
+            u_palHigh: toVec(params.colorHighlight),
+            u_algo: algo
+        };
     }
 };
 

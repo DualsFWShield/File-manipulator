@@ -101,5 +101,150 @@ export const HalftoneEffect = {
         });
 
         ctx.globalCompositeOperation = 'source-over';
+    },
+
+    // --- GPU Support ---
+    shaderSource: `#version 300 es
+    precision mediump float;
+    
+    in vec2 v_uv;
+    uniform sampler2D u_image;
+    uniform vec2 u_resolution;
+    uniform float u_scale;
+    uniform float u_opacity;
+    uniform vec4 u_angles; // C, M, Y, K angles in degrees
+
+    out vec4 outColor;
+
+    #define PI 3.14159265359
+
+    float pattern(vec2 uv, float angle, float scale) {
+        float rad = radians(angle);
+        float s = sin(rad);
+        float c = cos(rad);
+        vec2 point = vec2(
+            uv.x * c - uv.y * s,
+            uv.x * s + uv.y * c
+        ) * scale;
+        return (sin(point.x) * sin(point.y)) * 4.0; 
+    }
+    
+    // Improved Dot Screen Function
+    float dotScreen(vec2 uv, float angle, float scale) {
+        float rad = radians(angle);
+        float s = sin(rad);
+        float c = cos(rad);
+        vec2 p = (uv * u_resolution) - (u_resolution * 0.5); // Center
+        
+        // Rotate
+        vec2 r = vec2(
+            p.x * c - p.y * s,
+            p.x * s + p.y * c
+        );
+        
+        // Grid Cells
+        vec2 nearest = floor(r / scale) * scale;
+        vec2 dist = r - nearest; // -scale to scale? no 0 to scale
+        vec2 center = vec2(scale * 0.5);
+        
+        // We need to sample color at the NEAREST grid center, but mapped back to UV
+        vec2 unrotNearest = vec2(
+            nearest.x * c + nearest.y * s,
+             -nearest.x * s + nearest.y * c
+        );
+        vec2 samplePos = (unrotNearest + (u_resolution * 0.5)) / u_resolution;
+        
+        // Fix edges
+        // samplePos = clamp(samplePos, 0.0, 1.0); // No, repeat 
+        
+        vec4 color = texture(u_image, samplePos);
+        
+        // Return channel intensity
+        return 0.0; // Placeholder, logic below is cleaner
+    }
+
+    // Standard CMYK Halftone Shader Logic
+    const vec2 center = vec2(0.5, 0.5);
+    
+    // Rotate 2D vector
+    vec2 rotate(vec2 v, float a) {
+        float s = sin(radians(a));
+        float c = cos(radians(a));
+        mat2 m = mat2(c, -s, s, c);
+        return m * v;
+    }
+
+    void main() {
+        vec4 color = texture(u_image, v_uv); // Current Pixel
+        
+        // CMYK Conversion
+        float k = 1.0 - max(max(color.r, color.g), color.b);
+        float c = (1.0 - color.r - k) / (1.0 - k);
+        float m = (1.0 - color.g - k) / (1.0 - k);
+        float y = (1.0 - color.b - k) / (1.0 - k);
+        
+        // Safety for pure black
+        if (1.0 - k < 0.001) { c=0.0; m=0.0; y=0.0; }
+
+        // Raster Pattern
+        // Use fragCoord for pixel-perfect grids
+        vec2 p = gl_FragCoord.xy; 
+        
+        float scale = max(2.0, u_scale); // Dot size in pixels
+        
+        // We evaluate Sine Dot Pattern: sin(x)*sin(y) > val means dot
+        // Or Distance Field: length(fract(uv)-0.5) < val
+        
+        // Distance field approach gives cleaner dots
+        
+        // Process Cyan
+        vec2 pC = rotate(p, u_angles.x);
+        vec2 gridC = fract(pC / scale) - 0.5;
+        float distC = length(gridC) * 2.0; // 0 to 1.414
+        float dotC = (distC < (c * 0.9)) ? 1.0 : 0.0; // 0.9 to avoid touching
+        
+        // Process Magenta
+        vec2 pM = rotate(p, u_angles.y);
+        vec2 gridM = fract(pM / scale) - 0.5;
+        float distM = length(gridM) * 2.0;
+        float dotM = (distM < (m * 0.9)) ? 1.0 : 0.0;
+
+        // Process Yellow
+        vec2 pY = rotate(p, u_angles.z);
+        vec2 gridY = fract(pY / scale) - 0.5;
+        float distY = length(gridY) * 2.0;
+        float dotY = (distY < (y * 0.9)) ? 1.0 : 0.0;
+        
+        // Process Black
+        vec2 pK = rotate(p, u_angles.w);
+        vec2 gridK = fract(pK / scale) - 0.5;
+        float distK = length(gridK) * 2.0;
+        float dotK = (distK < (k * 0.9)) ? 1.0 : 0.0;
+
+        // Mix (Multiply)
+        // Paper is white
+        vec3 final = vec3(1.0);
+        
+        // Mix Cyan (0,1,1)
+        if (dotC > 0.5) final *= vec3(0.0, 1.0, 1.0); 
+        // Mix Magenta (1,0,1)
+        if (dotM > 0.5) final *= vec3(1.0, 0.0, 1.0);
+        // Mix Yellow (1,1,0)
+        if (dotY > 0.5) final *= vec3(1.0, 1.0, 0.0);
+        // Mix Black (0,0,0)
+        if (dotK > 0.5) final *= vec3(0.0, 0.0, 0.0);
+        
+        // Opacity blend
+        vec4 original = texture(u_image, v_uv);
+        outColor = mix(original, vec4(final, 1.0), u_opacity);
+    }`,
+
+    getUniforms: (params, width, height, scaleFactor = 1.0) => {
+        return {
+            u_resolution: [width, height],
+            u_scale: params.scale * scaleFactor,
+            u_opacity: params.opacity,
+            u_angles: [params.angleC, params.angleM, params.angleY, params.angleK]
+        };
     }
 };

@@ -1,12 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VOID | Multimedia Manipulator</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
 </head>
+
 <body>
 
     <div class="app-container">
@@ -17,13 +21,15 @@
                 <h1>VOID</h1>
             </div>
             <div class="header-controls">
+                <a href="corruption.html" class="btn btn-secondary"
+                    style="margin-right:10px; text-decoration:none; display:inline-block; line-height:20px;">CORRUPTION_TOOLS</a>
                 <button id="export-btn" class="btn btn-primary" disabled>EXPORT_RESULT</button>
             </div>
         </header>
 
         <!-- Main Workspace -->
         <main class="workspace">
-            
+
             <!-- Left Panel: Controls -->
             <aside class="panel control-panel">
                 <div class="panel-header">
@@ -42,19 +48,20 @@
             <!-- Center View: Preview -->
             <section class="preview-area" id="drop-zone">
                 <div class="preview-container" id="preview-container">
-                    
+
                     <div class="upload-prompt">
                         <div class="icon-upload">⇪</div>
                         <h3>DRAG & DROP FILE</h3>
                         <p>SUPPORTED: JPG, PNG, MP3, WAV</p>
                         <input type="file" id="file-input" hidden accept="image/*,audio/*,video/*">
-                        <button class="btn btn-secondary" onclick="document.getElementById('file-input').click()">BROWSE_FILES</button>
+                        <button class="btn btn-secondary"
+                            onclick="document.getElementById('file-input').click()">BROWSE_FILES</button>
                     </div>
 
                     <!-- Canvases and Players will be appended here -->
                     <canvas id="main-canvas" hidden></canvas>
                     <div id="audio-visualizer" hidden></div>
-                    
+
                 </div>
             </section>
 
@@ -74,4 +81,5 @@
     <!-- Scripts -->
     <script type="module" src="js/main.js"></script>
 </body>
+
 </html>

@@ -70,6 +70,7 @@ export class UIBuilder {
             addSelect: (label, options, value, onChange) => this.addSelect(content, label, options, value, onChange),
             addToggle: (label, value, onChange) => this.addToggle(content, label, value, onChange),
             addColor: (label, value, onChange) => this.addColor(content, label, value, onChange),
+            addNumber: (label, value, onChange) => this.addNumber(content, label, value, onChange),
             addDescription: (text) => this.addDescription(content, text)
         };
     }
@@ -170,6 +171,29 @@ export class UIBuilder {
 
         input.addEventListener('input', (e) => {
             onChange(e.target.value);
+        });
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        parent.appendChild(wrapper);
+    }
+
+    addNumber(parent, labelText, value, onChange) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'control-item control-number';
+
+        const label = document.createElement('label');
+        label.textContent = labelText;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = value;
+        input.style.width = '80px';
+        input.className = 'btn-secondary'; // Recycle style
+        input.style.padding = '5px';
+
+        input.addEventListener('change', (e) => {
+            onChange(parseFloat(e.target.value));
         });
 
         wrapper.appendChild(label);

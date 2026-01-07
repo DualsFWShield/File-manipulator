@@ -37,8 +37,8 @@ function loadSample(filename) {
 const headerControls = document.querySelector('.header-controls');
 const sampleSelect = document.createElement('select');
 sampleSelect.innerHTML = `<option value="">LOAD SAMPLE...</option>`;
-// Hardcoded list since we can't scan dir client-side easily without server
 const samples = [
+    'BLANK',
     'imagesample.png',
     'imagesample.jpg',
     'videosample.mp4',
@@ -54,7 +54,20 @@ samples.forEach(s => {
 });
 sampleSelect.style.marginRight = '10px';
 sampleSelect.addEventListener('change', (e) => {
-    if (e.target.value) loadSample(e.target.value);
+    if (!e.target.value) return;
+
+    if (e.target.value === 'BLANK') {
+        // Create a 1920x1080 transparent PNG
+        const canvas = document.createElement('canvas');
+        canvas.width = 1920;
+        canvas.height = 1080;
+        canvas.toBlob(blob => {
+            const file = new File([blob], "blank_canvas.png", { type: "image/png" });
+            handleFile(file);
+        });
+    } else {
+        loadSample(e.target.value);
+    }
 });
 headerControls.insertBefore(sampleSelect, headerControls.firstChild);
 

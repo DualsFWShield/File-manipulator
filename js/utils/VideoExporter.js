@@ -24,6 +24,11 @@ export class VideoExporter {
         this.isProcessing = true;
         this.stopFlag = false;
 
+        // Cleanup variables must be declared outside try/catch
+        let originalW = processor.canvas.width;
+        let originalH = processor.canvas.height;
+        let resizeNeeded = false;
+
         try {
             const width = isFullRes ? video.videoWidth : processor.canvas.width;
             const height = isFullRes ? video.videoHeight : processor.canvas.height;
@@ -59,6 +64,18 @@ export class VideoExporter {
             renderCanvas.height = height;
             const ctx = renderCanvas.getContext('2d', { willReadFrequently: true });
 
+            // Resize Logic
+            if (originalW !== width || originalH !== height) {
+                resizeNeeded = true;
+                processor.canvas.width = width;
+                processor.canvas.height = height;
+                if (processor.glManager) {
+                    processor.gpuCanvas.width = width;
+                    processor.gpuCanvas.height = height;
+                    processor.glManager.gl.viewport(0, 0, width, height);
+                }
+            }
+
             // Frame Loop
             const timeStep = 1 / fps;
             video.pause();
@@ -78,10 +95,26 @@ export class VideoExporter {
                 });
 
                 // DRAW & PROCESS
-                ctx.drawImage(video, 0, 0, width, height);
-                processor.pipeline.forEach(effect => {
-                    effect.process(ctx, width, height, processor.state[effect.id], 1.0);
-                });
+                // Render Frame
+                if (processor.useGPU) {
+                    processor.tryGPURender(video, isFullRes ? 1.0 : 1.0); // Scale factor 1.0 as we resized canvas
+                    // Copy result to renderCanvas
+                    ctx.drawImage(processor.canvas, 0, 0);
+                } else {
+                    // CPU Path - Manual Draw
+                    // Handle Background
+                    if (processor.backgroundMode === 'color') {
+                        ctx.fillStyle = processor.backgroundColor;
+                        ctx.fillRect(0, 0, width, height);
+                    } else if (processor.backgroundMode === 'image') {
+                        ctx.drawImage(video, 0, 0, width, height);
+                    }
+                    // Transparent: Do nothing
+
+                    processor.pipeline.forEach(effect => {
+                        effect.process(ctx, width, height, processor.state[effect.id], 1.0);
+                    });
+                }
 
                 // ENCODE
                 if (format === 'webm') {
@@ -89,9 +122,8 @@ export class VideoExporter {
                     encoder.encode(frame);
                     frame.close();
                 } else {
-                    // GIF Encode
+                    // GIF
                     const data = ctx.getImageData(0, 0, width, height).data;
-                    // Quantize to 256 colors
                     const palette = quantize(data, 256);
                     const index = applyPalette(data, palette);
                     gif.writeFrame(index, width, height, { palette, delay: (1000 / fps) });
@@ -100,7 +132,8 @@ export class VideoExporter {
                 // PROGRESS
                 if (i % 5 === 0) {
                     onProgress((i / totalFrames) * 100, `RENDERING [${format}] ${i}/${totalFrames}`);
-                    await new Promise(r => requestAnimationFrame(r));
+                    // Yield to UI
+                    await new Promise(r => setTimeout(r, 0));
                 }
             }
 
@@ -123,6 +156,17 @@ export class VideoExporter {
             this.isProcessing = false;
             console.error("Export Error:", err);
             throw err;
+        } finally {
+            // RESTORE Canvas size
+            if (resizeNeeded) {
+                processor.canvas.width = originalW;
+                processor.canvas.height = originalH;
+                if (processor.glManager) {
+                    processor.gpuCanvas.width = originalW;
+                    processor.gpuCanvas.height = originalH;
+                    processor.glManager.gl.viewport(0, 0, originalW, originalH);
+                }
+            }
         }
     }
 
