@@ -122,7 +122,6 @@ export class ImageProcessor {
         // UI & Animation
         this.generateUI();
         if (!this.animator) this.animator = new Animator(this);
-        else this.animator.setupUI();
 
         // Batch Manager
         if (!this.batchManager) {
@@ -439,6 +438,11 @@ export class ImageProcessor {
                 this.requestRender();
             });
         });
+
+        // Re-attach Animation Controls if they exist
+        if (this.animator) {
+            this.animator.setupUI();
+        }
     }
 
     requestRender() {
