@@ -8,7 +8,7 @@ export const PreProcessEffect = {
     description: "Adjust Levels, Color Grading, Sharpen, and Noise.",
 
     params: {
-        enabled: true,
+        enabled: false,
         // Blur
         blurRadius: 0, // 0-20
         // Sharpen
@@ -29,32 +29,33 @@ export const PreProcessEffect = {
     },
 
     getControls: (builder, params, onUpdate) => {
-        const group = builder.createModuleGroup("PRE-PROCESSING", (enabled) => onUpdate('enabled', enabled), PreProcessEffect.description);
+        const group = builder.createModuleGroup("IMAGE PRE-PROCESS", (enabled) => onUpdate('enabled', enabled), params.enabled, PreProcessEffect.description);
 
-        // LEVELS
-        group.addSlider("LEVELS BLACK", 0, 255, params.levelBlack, 1, (v) => onUpdate('levelBlack', v));
-        group.addSlider("LEVELS WHITE", 0, 255, params.levelWhite, 1, (v) => onUpdate('levelWhite', v));
-        group.addSlider("GAMMA", 0.1, 3.0, params.gamma, 0.1, (v) => onUpdate('gamma', v));
+        if (true) {
+            group.addSlider("BLUR RADIUS", 0, 20, params.blurRadius, 0.5, (v) => onUpdate('blurRadius', v), "Softens image details (Blur).");
+            group.addSlider("SHARPEN %", 0, 100, params.sharpenAmount, 1, (v) => onUpdate('sharpenAmount', v), "Enhances edge definition.");
+            group.addSlider("NOISE / GRAIN", 0, 100, params.noiseAmount, 1, (v) => onUpdate('noiseAmount', v), "Adds film grain texture.");
 
-        // COLOR
-        group.addSlider("SATURATION %", 0, 200, params.saturation, 5, (v) => onUpdate('saturation', v));
-        group.addSlider("BRIGHTNESS", -100, 100, params.brightness, 1, (v) => onUpdate('brightness', v));
-        group.addSlider("HUE SHIFT", -180, 180, params.hue, 5, (v) => onUpdate('hue', v));
-        group.addSlider("INTENSITY (Vibrance)", -100, 100, params.intensity, 5, (v) => onUpdate('intensity', v));
+            group.addDescription("LEVELS ADJUSTMENT");
+            group.addSlider("LEVELS BLACK", 0, 255, params.levelBlack, 1, (v) => onUpdate('levelBlack', v), "Sets the black point threshold (Darkens).");
+            group.addSlider("LEVELS WHITE", 0, 255, params.levelWhite, 1, (v) => onUpdate('levelWhite', v), "Sets the white point threshold (Brightens).");
+            group.addSlider("GAMMA", 0.1, 5.0, params.gamma, 0.1, (v) => onUpdate('gamma', v), "Adjusts mid-tone brightness.");
 
-        group.addToggle("INVERT ENABLED", params.invert, (v) => onUpdate('invert', v));
-        if (params.invert) {
-            group.addSelect("INVERT MODE", [
-                { label: "Normal (Negative)", value: 'normal' },
-                { label: "Smart Luma (Preserve Color)", value: 'luma' },
-                { label: "Smart Hue (Complementary)", value: 'hue' }
-            ], params.invertMode, (v) => onUpdate('invertMode', v));
+            group.addDescription("COLOR GRADING");
+            group.addSlider("SATURATION %", 0, 200, params.saturation, 1, (v) => onUpdate('saturation', v), "Color intensity (0 = B&W).");
+            group.addSlider("BRIGHTNESS", -100, 100, params.brightness, 1, (v) => onUpdate('brightness', v), "Global image brightness.");
+            group.addSlider("HUE SHIFT", -180, 180, params.hue, 1, (v) => onUpdate('hue', v), "Rotates colors around the wheel.");
+            group.addSlider("INTENSITY (Vibrance)", -100, 100, params.intensity, 1, (v) => onUpdate('intensity', v), "Smart saturation protecting skin tones.");
+
+            group.addToggle("INVERT ENABLED", params.invert, (v) => onUpdate('invert', v), "Invert colors (Negative).");
+            if (params.invert) {
+                group.addSelect("INVERT MODE", [
+                    { label: "Normal (Negative)", value: 'normal' },
+                    { label: "Smart Luma (Preserve Color)", value: 'luma' },
+                    { label: "Smart Hue (Complementary)", value: 'hue' }
+                ], params.invertMode, (v) => onUpdate('invertMode', v), "Inversion Mode: Negative, Luma only, or Hue.");
+            }
         }
-
-        // DETAIL
-        group.addSlider("BLUR RADIUS", 0, 20, params.blurRadius, 0.5, (v) => onUpdate('blurRadius', v));
-        group.addSlider("SHARPEN %", 0, 100, params.sharpenAmount, 5, (v) => onUpdate('sharpenAmount', v));
-        group.addSlider("NOISE / GRAIN", 0, 100, params.noiseAmount, 1, (v) => onUpdate('noiseAmount', v));
     },
 
     process: (ctx, width, height, params, scaleFactor = 1.0) => {

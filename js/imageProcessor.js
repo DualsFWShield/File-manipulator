@@ -68,8 +68,16 @@ export class ImageProcessor {
         this.sourceType = 'image';
         if (this.videoElement) {
             this.videoElement.pause();
-            this.videoElement = null; // Cleanup
+            this.videoElement.removeAttribute('src'); // clear source
+            this.videoElement.load(); // stop download
+            this.videoElement.remove(); // removes from DOM if appended
+            this.videoElement = null; // cleanup
         }
+        // Brute force cleanup of any rogue video elements overlaying
+        document.querySelectorAll('video').forEach(v => {
+            v.pause();
+            v.remove();
+        });
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -143,7 +151,7 @@ export class ImageProcessor {
         const header = document.querySelector('.header-controls');
 
         // Remove existing dynamic buttons to avoid duplicates
-        ['record-btn', 'quick-btn', 'video-full-btn', 'video-quick-btn'].forEach(id => {
+        ['record-btn', 'quick-btn', 'video-full-btn', 'video-quick-btn', 'vid-toggle-btn', 'format-select'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.remove();
         });
@@ -158,7 +166,8 @@ export class ImageProcessor {
         const videoQuick = this.createBtn('VID QUICK', 'video-quick-btn', () => this.exportVideo(false, videoQuick));
 
         // Connect Main Export
-        exportMain.onclick = () => this.exportResult(false); // Uses Settings
+        // FIXED: Do not assign onclick here, it creates a duplicate event because main.js already adds a listener.
+        // exportMain.onclick = () => this.exportResult(false); 
 
         // Video Controls (If Video Mode)
         if (this.sourceType === 'video') {
@@ -192,12 +201,16 @@ export class ImageProcessor {
             formatSelect.value = this.exportFormat; // Set initial value
 
             header.insertBefore(formatSelect, exportMain);
+
+            // Insert in order: VID QUICK | VID FULL 
+            header.insertBefore(videoQuick, exportMain);
+            header.insertBefore(videoFull, exportMain);
         }
 
-        // Insert in order: VID QUICK | VID FULL | IMG QUICK | [IMG FULL (Existing)]
-        header.insertBefore(videoQuick, exportMain);
-        header.insertBefore(videoFull, exportMain);
-        header.insertBefore(imgQuick, exportMain);
+        // Image controls (Only if Image)
+        if (this.sourceType === 'image') {
+            header.insertBefore(imgQuick, exportMain);
+        }
     }
 
     createBtn(text, id, onClick) {

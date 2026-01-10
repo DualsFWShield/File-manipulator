@@ -61,59 +61,157 @@ export class AudioProcessor {
                 // Don't auto-play, let user decide
                 // this.play(); 
 
-                document.getElementById('audio-visualizer').innerHTML = `
-                    <div style="text-align:center; padding-top: 50px; color: var(--accent-primary);">
-                        <h3>AUDIO LOADED</h3>
-                        <p>${file.name}</p>
-                        <p style="font-size: 0.8em; color: var(--text-dim);">${(this.buffer.duration).toFixed(2)}s</p>
-                        <div class="visualizer-bars">||||| ||| |||||</div>
-                    </div>
-                `;
+                document.getElementById('audio-visualizer').innerHTML = ''; // Clear
+                this.renderPlayer(file.name);
             }, (e) => alert("Error decoding audio: " + e.message));
         };
         reader.readAsArrayBuffer(file);
     }
 
+    renderPlayer(filename) {
+        const container = document.getElementById('audio-visualizer');
+        container.hidden = false;
+        container.classList.add('visualizer-container'); // Center it
+
+        container.innerHTML = `
+            <div class="audio-player-container">
+                <button class="player-btn" id="ap-rewind" title="Rewind 5s">«</button>
+                <button class="btn-main-play" id="ap-play">▶</button>
+                <button class="player-btn" id="ap-forward" title="Forward 5s">»</button>
+                
+                <div class="player-slider-container">
+                    <input type="range" class="player-range" id="ap-seek" min="0" max="100" value="0">
+                </div>
+                
+                <div class="player-time" id="ap-time">00:00 / 00:00</div>
+                
+                <div class="player-btn">🔊</div>
+                <input type="range" class="player-range vol-slider" id="ap-vol" min="0" max="1" step="0.05" value="${this.params.gain}">
+            </div>
+            <div style="margin-top:10px; color:var(--text-muted); font-size:0.8rem;">${filename}</div>
+        `;
+
+        // Bind Events
+        const playBtn = document.getElementById('ap-play');
+        const seek = document.getElementById('ap-seek');
+        const vol = document.getElementById('ap-vol');
+        const rewind = document.getElementById('ap-rewind');
+        const forward = document.getElementById('ap-forward');
+
+        playBtn.onclick = () => this.toggleIconPlay();
+        rewind.onclick = () => { this.startTime += 5; this.pauseTime -= 5; this.restart(); }; // Simple seek hack
+        forward.onclick = () => { this.startTime -= 5; this.pauseTime += 5; this.restart(); };
+
+        seek.oninput = (e) => {
+            // Seeking logic requires restart usually in WebAudio or offset calc
+            const pct = e.target.value / 100;
+            const time = pct * this.buffer.duration;
+            this.seekTo(time);
+        };
+
+        vol.oninput = (e) => {
+            this.params.gain = parseFloat(e.target.value);
+            if (this.gainNode) this.gainNode.gain.value = this.params.gain;
+        };
+
+        // Start Animation Loop for Time/Seek
+        this.updatePlayerUI();
+    }
+
+    toggleIconPlay() {
+        if (this.isPlaying) this.pause();
+        else this.play();
+    }
+
+    seekTo(time) {
+        const wasPlaying = this.isPlaying;
+        if (this.isPlaying) this.stop();
+
+        this.pauseTime = time;
+        // startTime is no longer used for tracking, pauseTime is master.
+
+        if (wasPlaying) this.play();
+        else this.updatePlayerUI();
+    }
+
+    updatePlayerUI() {
+        if (!this.buffer) return;
+        requestAnimationFrame(() => this.updatePlayerUI());
+
+        const playBtn = document.getElementById('ap-play');
+        const seek = document.getElementById('ap-seek');
+        const timeDisplay = document.getElementById('ap-time');
+
+        if (playBtn) playBtn.textContent = this.isPlaying ? "II" : "▶";
+
+        // Delta Time Tracking for accurate Speed/Loop handling
+        const now = performance.now() / 1000;
+        if (!this.lastFrameTime) this.lastFrameTime = now;
+        const dt = now - this.lastFrameTime;
+        this.lastFrameTime = now;
+
+        if (this.isPlaying) {
+            // Accumulate time based on speed
+            this.pauseTime += dt * this.params.speed;
+
+            // Loop Logic
+            if (this.pauseTime >= this.buffer.duration) {
+                if (this.params.loop !== false) { // Default loop true unless explicitly false? 
+                    // Actually source.loop handles audio. We just match UI.
+                    this.pauseTime = this.pauseTime % this.buffer.duration;
+                } else {
+                    this.pauseTime = this.buffer.duration;
+                    this.stop();
+                }
+            }
+        }
+
+        let current = this.pauseTime;
+
+        // UI Updates
+        if (seek && document.activeElement !== seek) {
+            const pct = (current / this.buffer.duration) * 100;
+            seek.value = isNaN(pct) ? 0 : pct;
+        }
+
+        if (timeDisplay) {
+            timeDisplay.textContent = `${this.fmtTime(current)} / ${this.fmtTime(this.buffer.duration)}`;
+        }
+    }
+
+    fmtTime(s) {
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    restart() {
+        if (this.isPlaying) {
+            this.stop();
+            this.play();
+        }
+    }
+
     generateUI() {
         this.ui.clear();
 
-        // --- MASTER CONTROLS ---
-        const master = this.ui.createModuleGroup("AUDIO DECK");
+        // Header Export Button
+        const header = document.querySelector('.header-controls');
+        // Remove old audio buttons if any
+        const oldExp = document.getElementById('audio-export-btn');
+        if (oldExp) oldExp.remove();
 
-        // Player Controls Container
-        const controls = document.createElement('div');
-        controls.style.display = 'flex';
-        controls.style.gap = '10px';
-        controls.style.marginBottom = '10px';
-
-        const mkBtn = (text, onClick, id) => {
-            const btn = document.createElement('button');
-            btn.textContent = text;
-            btn.className = 'btn btn-secondary';
-            btn.style.flex = '1';
-            if (id) btn.id = id;
-            btn.onclick = onClick;
-            return btn;
-        };
-
-        const playBtn = mkBtn('PLAY', () => this.play(), 'audio-play');
-        const pauseBtn = mkBtn('PAUSE', () => this.pause(), 'audio-pause');
-        const stopBtn = mkBtn('STOP', () => this.stop(), 'audio-stop');
-
-        controls.appendChild(playBtn);
-        controls.appendChild(pauseBtn);
-        controls.appendChild(stopBtn);
-        master.content.appendChild(controls);
-
-        // Export Button
         const exportBtn = document.createElement('button');
+        exportBtn.id = 'audio-export-btn';
         exportBtn.className = 'btn btn-primary';
-        exportBtn.textContent = 'EXPORT AUDIO (.WAV)';
-        exportBtn.style.width = '100%';
-        exportBtn.style.marginTop = '10px';
-        exportBtn.style.position = 'relative'; // For progress fill if needed
+        exportBtn.textContent = 'EXPORT .WAV';
+        exportBtn.style.marginLeft = '10px';
         exportBtn.onclick = () => this.exportOffline(exportBtn);
-        master.content.appendChild(exportBtn);
+
+        // Find existing Export Image and hide/replace?
+        // Main.js hides 'export-btn'. We insert this one.
+        header.appendChild(exportBtn);
+
 
         // --- NOISE & DISTORTION ---
         const distGroup = this.ui.createModuleGroup("NOISE & DISTORTION");
@@ -169,15 +267,19 @@ export class AudioProcessor {
 
         this.source = this.audioCtx.createBufferSource();
         this.source.buffer = this.buffer;
-        this.source.loop = true; // Loop by default? User said "Stop the loop", but usually music loops unless it's a long track. 
-        // Let's ask user? Or assume Loop is fine if we have Stop.
-        // User said: "ça tourne en boucle. C'est inarrêtable."
-        // So they want control. Loop is fine if controllable.
+        this.source.loop = true;
+        // Sync playback rate immediately
+        if (this.source.playbackRate) this.source.playbackRate.value = this.params.speed;
 
         this.setupGraph(this.audioCtx, this.source, this.audioCtx.destination);
 
-        this.source.start(0, this.pauseTime);
-        this.startTime = this.audioCtx.currentTime - this.pauseTime;
+        // Start from current pauseTime
+        // We must handle the offset for the Source Node. 
+        // Source node 'offset' parameter does NOT account for speed, it is buffer time.
+        // So this is correct:
+        this.source.start(0, this.pauseTime % this.buffer.duration);
+
+        this.lastFrameTime = performance.now() / 1000;
         this.isPlaying = true;
         this.isPaused = false;
 
@@ -186,8 +288,11 @@ export class AudioProcessor {
 
     pause() {
         if (!this.isPlaying) return;
-        this.source.stop();
-        this.pauseTime = this.audioCtx.currentTime - this.startTime;
+
+        try { if (this.source) this.source.stop(); } catch (e) { }
+        try { if (this.noiseNode) this.noiseNode.stop(); } catch (e) { }
+
+        // pauseTime is already updated by updatePlayerUI frame-by-frame
         this.isPlaying = false;
         this.isPaused = true;
         this.updateBtnState('PAUSE');
@@ -198,6 +303,11 @@ export class AudioProcessor {
             try { this.source.stop(); } catch (e) { }
             this.source.disconnect();
         }
+        if (this.noiseNode) {
+            try { this.noiseNode.stop(); } catch (e) { }
+            this.noiseNode.disconnect();
+        }
+
         this.isPlaying = false;
         this.isPaused = false;
         this.pauseTime = 0;

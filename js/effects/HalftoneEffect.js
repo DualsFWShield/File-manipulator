@@ -17,15 +17,17 @@ export const HalftoneEffect = {
     },
 
     getControls: (builder, params, onUpdate) => {
-        const group = builder.createModuleGroup("OFFSET PRINTER (CMYK)", (enabled) => onUpdate('enabled', enabled), HalftoneEffect.description);
+        const group = builder.createModuleGroup("CMYK HALFTONE", (enabled) => onUpdate('enabled', enabled), params.enabled, HalftoneEffect.description);
 
-        group.addSlider("DOT SIZE (DPI)", 1, 20, params.scale, 0.5, (v) => onUpdate('scale', v));
-        group.addSlider("OPACITY", 0, 1.0, params.opacity, 0.05, (v) => onUpdate('opacity', v));
-
-        group.addSlider("ANGLE CYAN", 0, 90, params.angleC, 1, (v) => onUpdate('angleC', v));
-        group.addSlider("ANGLE MAGENTA", 0, 90, params.angleM, 1, (v) => onUpdate('angleM', v));
-        group.addSlider("ANGLE YELLOW", 0, 90, params.angleY, 1, (v) => onUpdate('angleY', v));
-        group.addSlider("ANGLE BLACK", 0, 90, params.angleK, 1, (v) => onUpdate('angleK', v));
+        if (true) {
+            // Add controls for enabled state
+            group.addSlider("DOT SIZE", 1, 20, params.scale, 1, (v) => onUpdate('scale', v), "Size of the halftone dots (DPI).");
+            group.addSlider("OPACITY", 0, 1, params.opacity, 0.01, (v) => onUpdate('opacity', v), "Opacity of the halftone overlay.");
+            group.addSlider("ANGLE CYAN", 0, 90, params.angleC, 1, (v) => onUpdate('angleC', v), "Screen angle for Cyan channel.");
+            group.addSlider("ANGLE MAGENTA", 0, 90, params.angleM, 1, (v) => onUpdate('angleM', v), "Screen angle for Magenta channel.");
+            group.addSlider("ANGLE YELLOW", 0, 90, params.angleY, 1, (v) => onUpdate('angleY', v), "Screen angle for Yellow channel.");
+            group.addSlider("ANGLE BLACK", 0, 90, params.angleK, 1, (v) => onUpdate('angleK', v), "Screen angle for Black channel.");
+        }
     },
 
     process: (ctx, width, height, params, scaleFactor = 1.0) => {

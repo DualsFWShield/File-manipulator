@@ -10,7 +10,7 @@ export const DitherEffect = {
     description: "Quantize colors and apply dithering patterns (Floyd-Steinberg, Bayer) with Retro Palettes.",
 
     params: {
-        enabled: true,
+        enabled: false,
         // Common
         resolution: 1.0,
         algorithm: 'floyd', // floyd, atkinson, sierra, bayer4, bayer8, modulation, stitched, thread, bitwave, grid
@@ -45,21 +45,15 @@ export const DitherEffect = {
     },
 
     getControls: (builder, params, onUpdate) => {
-        const group = builder.createModuleGroup("DITHERING ENGINE", (enabled) => onUpdate('enabled', enabled), DitherEffect.description);
+        const group = builder.createModuleGroup("DITHERING ENGINE", (enabled) => onUpdate('enabled', enabled), params.enabled, DitherEffect.description);
 
-        const refreshUI = (mode) => {
-            if (tonalDiv) tonalDiv.style.display = mode === 'tonal' ? 'block' : 'none';
-            if (gradeDiv) gradeDiv.style.display = mode === 'grade' ? 'block' : 'none';
-        };
-
-        // --- MAIN RENDER SETTINGS ---
         group.addSelect("RENDER MODE", [
             { label: "TONAL (Luminance Gradient)", value: "tonal" },
             { label: "GRADE (Color Palette)", value: "grade" }
         ], params.renderMode, (v) => {
             onUpdate('renderMode', v);
             refreshUI(v); // Trigger Visibility toggle
-        });
+        }, "Render Mode: Tonal (B&W Gradients) or Grade (Color Palettes).");
 
         group.addSelect("ALGORITHM", [
             { label: "None (Pixelate)", value: "none" },
@@ -72,9 +66,9 @@ export const DitherEffect = {
             { label: "Bitwave (Sine)", value: "bitwave" },
             { label: "Grid Modulation (Cross)", value: "grid" },
             { label: "Stitched (Rug)", value: "stitched" }
-        ], params.algorithm, (v) => onUpdate('algorithm', v));
+        ], params.algorithm, (v) => onUpdate('algorithm', v), "Error Diffusion Algorithm used for dithering.");
 
-        group.addSlider("RESOLUTION / DPI", 0.05, 1.0, params.resolution, 0.05, (v) => onUpdate('resolution', v));
+        group.addSlider("RESOLUTION / DPI", 0.05, 1.0, params.resolution, 0.05, (v) => onUpdate('resolution', v), "Pixelation factor / Downsampling.");
 
         // --- CONTAINERS ---
         const tonalDiv = document.createElement('div');
@@ -85,15 +79,20 @@ export const DitherEffect = {
         gradeDiv.className = 'sub-group_grade';
         group.content.appendChild(gradeDiv);
 
+        const refreshUI = (mode) => {
+            tonalDiv.style.display = mode === 'tonal' ? 'block' : 'none';
+            gradeDiv.style.display = mode === 'grade' ? 'block' : 'none';
+        };
+
         // --- POPULATE TONAL ---
         builder.addDescription(tonalDiv, "Map grayscale to gradient. Tweaking Mid-Points.");
-        builder.addSlider(tonalDiv, "LUMA LOW (Shadow Cut)", 0, 255, params.lumaLow, 1, (v) => onUpdate('lumaLow', v));
-        builder.addSlider(tonalDiv, "LUMA HIGH (Highlight Cut)", 0, 255, params.lumaHigh, 1, (v) => onUpdate('lumaHigh', v));
+        builder.addSlider(tonalDiv, "LUMA LOW (Shadow Cut)", 0, 255, params.lumaLow, 1, (v) => onUpdate('lumaLow', v), "Black point threshold (Clip Shadows).");
+        builder.addSlider(tonalDiv, "LUMA HIGH (Highlight Cut)", 0, 255, params.lumaHigh, 1, (v) => onUpdate('lumaHigh', v), "White point threshold (Clip Highlights).");
 
         if (builder.addColor) {
-            builder.addColor(tonalDiv, "HIGHLIGHT", params.colorHighlight, (v) => onUpdate('colorHighlight', v));
-            builder.addColor(tonalDiv, "MIDTONE", params.colorMid, (v) => onUpdate('colorMid', v));
-            builder.addColor(tonalDiv, "SHADOW", params.colorShadow, (v) => onUpdate('colorShadow', v));
+            builder.addColor(tonalDiv, "HIGHLIGHT", params.colorHighlight, (v) => onUpdate('colorHighlight', v), "Color for highlights.");
+            builder.addColor(tonalDiv, "MIDTONE", params.colorMid, (v) => onUpdate('colorMid', v), "Color for midtones.");
+            builder.addColor(tonalDiv, "SHADOW", params.colorShadow, (v) => onUpdate('colorShadow', v), "Color for shadows.");
         }
 
         // --- POPULATE GRADE ---
@@ -103,22 +102,22 @@ export const DitherEffect = {
         palOptions.unshift({ label: "AUTO (Extract 4)", value: 'extract_4' });
         palOptions.unshift({ label: "AUTO (Extract 64)", value: 'extract_64' });
 
-        builder.addSelect(gradeDiv, "PALETTE", palOptions, params.palette, (v) => onUpdate('palette', v));
-        builder.addSlider(gradeDiv, "CONTRAST", -100, 100, params.contrast, 1, (v) => onUpdate('contrast', v));
+        builder.addSelect(gradeDiv, "PALETTE", palOptions, params.palette, (v) => onUpdate('palette', v), "Color palette used for quantization.");
+        builder.addSlider(gradeDiv, "CONTRAST", -100, 100, params.contrast, 1, (v) => onUpdate('contrast', v), "Adjust contrast before reducing colors.");
 
         // Initial Visibility
         refreshUI(params.renderMode);
 
         // --- COMMON ADVANCED ---
         // Append to main group again
-        group.addSlider("ROUNDING (Stylize)", 0.0, 1.0, params.roundness, 0.05, (v) => onUpdate('roundness', v));
+        group.addSlider("ROUNDING (Stylize)", 0.0, 1.0, params.roundness, 0.05, (v) => onUpdate('roundness', v), "Pixel shape rounding (Post-Blur).");
 
         if (['bayer4', 'bayer8', 'bitwave', 'grid', 'stitched', 'thread'].includes(params.algorithm)) {
-            group.addSlider("SPREAD / BIAS", 0.1, 5.0, params.spread, 0.1, (v) => onUpdate('spread', v));
+            group.addSlider("SPREAD / BIAS", 0.1, 5.0, params.spread, 0.1, (v) => onUpdate('spread', v), "Dithering matrix spread/bias.");
         }
 
-        group.addSlider("BLEEDING", 0.0, 1.0, params.bleeding, 0.05, (v) => onUpdate('bleeding', v));
-        group.addToggle("KNOCKOUT BG", params.knockout, (v) => onUpdate('knockout', v));
+        group.addSlider("BLEEDING", 0.0, 1.0, params.bleeding, 0.05, (v) => onUpdate('bleeding', v), "Ink bleed simulation.");
+        group.addToggle("KNOCKOUT BG", params.knockout, (v) => onUpdate('knockout', v), "Make background transparent (Removes black/white).");
     },
 
     process: (ctx, width, height, params, scaleFactor = 1.0) => {

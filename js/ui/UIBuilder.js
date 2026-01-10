@@ -27,7 +27,7 @@ export class UIBuilder {
         parent.appendChild(desc);
     }
 
-    createModuleGroup(title, onToggle = null, description = "") {
+    createModuleGroup(title, onToggle = null, initialState = true, description = "") {
         const group = document.createElement('div');
         group.className = 'module-group';
 
@@ -43,7 +43,7 @@ export class UIBuilder {
         if (onToggle) {
             const toggle = document.createElement('input');
             toggle.type = 'checkbox';
-            toggle.checked = true; // Default ON? Or check params?
+            toggle.checked = initialState;
             // Issue: if state is OFF, this should be off. 
             // We assume caller handles initial state or we enable by default and let caller sync.
             // Ideally, we pass initial state here.
@@ -66,9 +66,9 @@ export class UIBuilder {
 
         return {
             content: content,
-            addSlider: (label, min, max, value, step, onChange) => this.addSlider(content, label, min, max, value, step, onChange),
-            addSelect: (label, options, value, onChange) => this.addSelect(content, label, options, value, onChange),
-            addToggle: (label, value, onChange) => this.addToggle(content, label, value, onChange),
+            addSlider: (label, min, max, value, step, onChange, tooltip) => this.addSlider(content, label, min, max, value, step, onChange, tooltip),
+            addSelect: (label, options, value, onChange, tooltip) => this.addSelect(content, label, options, value, onChange, tooltip),
+            addToggle: (label, value, onChange, tooltip) => this.addToggle(content, label, value, onChange, tooltip),
             addColor: (label, value, onChange) => this.addColor(content, label, value, onChange),
             addNumber: (label, value, onChange) => this.addNumber(content, label, value, onChange),
             addDescription: (text) => this.addDescription(content, text),
@@ -77,7 +77,51 @@ export class UIBuilder {
         };
     }
 
-    addSlider(parent, labelText, min, max, value, step, onChange) {
+    renderTooltip(parent, text) {
+        if (!text) return;
+        const icon = document.createElement('span');
+        icon.className = 'tooltip-icon';
+        icon.textContent = '?';
+
+        // ensure global tooltip exists
+        let globalTooltip = document.getElementById('global-tooltip');
+        if (!globalTooltip) {
+            globalTooltip = document.createElement('div');
+            globalTooltip.id = 'global-tooltip';
+            document.body.appendChild(globalTooltip);
+        }
+
+        icon.addEventListener('mouseenter', (e) => {
+            const rect = icon.getBoundingClientRect();
+            globalTooltip.textContent = text;
+            globalTooltip.style.display = 'block';
+
+            // Calculate Position (Right of icon, centered vertically)
+            let top = rect.top + (rect.height / 2) - (globalTooltip.offsetHeight / 2);
+            let left = rect.right + 10;
+
+            // Prevent going off-screen (Right)
+            if (left + globalTooltip.offsetWidth > window.innerWidth - 10) {
+                // Flip to Left
+                left = rect.left - globalTooltip.offsetWidth - 10;
+            }
+
+            // Prevent going off-screen (Top/Bottom)
+            if (top < 10) top = 10;
+            // if (top + height > window.innerHeight) ...
+
+            globalTooltip.style.top = `${top}px`;
+            globalTooltip.style.left = `${left}px`;
+        });
+
+        icon.addEventListener('mouseleave', () => {
+            globalTooltip.style.display = 'none';
+        });
+
+        parent.appendChild(icon);
+    }
+
+    addSlider(parent, labelText, min, max, value, step, onChange, tooltip = "") {
         const wrapper = document.createElement('div');
         wrapper.className = 'control-item control-slider';
 
@@ -86,6 +130,7 @@ export class UIBuilder {
 
         const label = document.createElement('label');
         label.textContent = labelText;
+        if (tooltip) this.renderTooltip(label, tooltip);
 
         const valDisplay = document.createElement('span');
         valDisplay.className = 'control-value';

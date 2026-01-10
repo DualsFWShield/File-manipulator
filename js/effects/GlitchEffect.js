@@ -16,12 +16,14 @@ export const GlitchEffect = {
     },
 
     getControls: (builder, params, onUpdate) => {
-        const group = builder.createModuleGroup("ERROR CORRUPTION", (enabled) => onUpdate('enabled', enabled), GlitchEffect.description);
+        const group = builder.createModuleGroup("ERROR CORRUPTION", (enabled) => onUpdate('enabled', enabled), params.enabled, GlitchEffect.description);
 
-        group.addSlider("RGB SHIFT", 0, 50, params.rgbShift, 1, (v) => onUpdate('rgbShift', v));
-        group.addSlider("SCANLINE OPACITY", 0, 1.0, params.scanlines, 0.05, (v) => onUpdate('scanlines', v));
-        group.addSlider("SCANLINE HEIGHT", 1, 10, params.scanlineSize, 1, (v) => onUpdate('scanlineSize', v));
-        group.addSlider("H-JITTER", 0, 1.0, params.jitter, 0.01, (v) => onUpdate('jitter', v));
+        if (true) {
+            group.addSlider("RGB SHIFT", 0, 50, params.rgbShift, 1, (v) => onUpdate('rgbShift', v), "Red/Blue channel offset (Chromatic Aberration).");
+            group.addSlider("SCANLINE OPACITY", 0, 1.0, params.scanlines, 0.05, (v) => onUpdate('scanlines', v), "Opacity of CRT-style scanlines.");
+            group.addSlider("SCANLINE HEIGHT", 1, 10, params.scanlineSize, 1, (v) => onUpdate('scanlineSize', v), "Thickness of scanlines.");
+            group.addSlider("H-JITTER", 0, 1.0, params.jitter, 0.01, (v) => onUpdate('jitter', v), "Horizontal random displacement probability.");
+        }
     },
 
     process: (ctx, width, height, params, scaleFactor = 1.0) => {
