@@ -1,8 +1,111 @@
 import { UIBuilder } from './ui/UIBuilder.js';
 
+// --- AUDIO WORKLET SOURCE ---
+const BITCRUSHER_WORKLET = `
+class BitcrusherProcessor extends AudioWorkletProcessor {
+    static get parameterDescriptors() {
+        return [
+            { name: 'bitDepth', defaultValue: 8, minValue: 1, maxValue: 16 },
+            { name: 'frequency', defaultValue: 0.5, minValue: 0.01, maxValue: 1.0 }
+        ];
+    }
+
+    constructor() {
+        super();
+        this.phaser = 0;
+    }
+
+    process(inputs, outputs, parameters) {
+        const input = inputs[0];
+        const output = outputs[0];
+        const bitDepth = parameters.bitDepth;
+        const frequency = parameters.frequency;
+
+        for (let channel = 0; channel < input.length; ++channel) {
+            const inputChannel = input[channel];
+            const outputChannel = output[channel];
+
+            if (bitDepth.length === 1 && frequency.length === 1) {
+                // Optimized case: no automation within block
+                const step = Math.pow(0.5, bitDepth[0]);
+                const phaserStep = frequency[0];
+                let lastSample = 0;
+
+                for (let i = 0; i < inputChannel.length; ++i) {
+                    this.phaser += phaserStep;
+                    if (this.phaser >= 1.0) {
+                        this.phaser -= 1.0;
+                        lastSample = step * Math.floor(inputChannel[i] / step + 0.5);
+                    }
+                    outputChannel[i] = lastSample;
+                }
+            } else {
+                // Automation case (less likely here but good practice)
+                for (let i = 0; i < inputChannel.length; ++i) {
+                     const bd = bitDepth.length > 1 ? bitDepth[i] : bitDepth[0];
+                     const fq = frequency.length > 1 ? frequency[i] : frequency[0];
+                     const step = Math.pow(0.5, bd);
+                     
+                     this.phaser += fq;
+                     if (this.phaser >= 1.0) {
+                        this.phaser -= 1.0;
+                        // Use raw input sample here to hold
+                        // Actually standard bitcrusher sample-and-hold logic requires storing the held sample.
+                        // Simplified:
+                     }
+                     // Re-implementing simplified logic matching original
+                     // Original looked at input[i] ONLY when phaser ticked.
+                     // That implies Sample & Hold.
+                     // The previous code was: lastSample = input[i]; ... output[i] = lastSample;
+                     // So we need state.
+                     // But AudioWorklet state persists across blocks.
+                     // We need 'this.lastSample' separate per channel if we wanted perfection, 
+                     // but mono processing is fine for now or shared.
+                     // Let's stick to the previous logic structure.
+                }
+            }
+        }
+        
+        // RE-IMPLEMENTING EXACT LOGIC FROM BEFORE BUT CORRECTED FOR WORKLET
+        // Only 1 channel supported in previous code? createScriptProcessor(bufferSize, 1, 1).
+        // Yes. So inputs[0][0] is the data.
+        
+        const inputData = input[0];
+        const outputData = output[0];
+        
+        // Fallback if no input
+        if (!inputData || !outputData) return true;
+
+        const bd = bitDepth.length === 1 ? bitDepth[0] : bitDepth[0]; 
+        const fq = frequency.length === 1 ? frequency[0] : frequency[0];
+        
+        const step = Math.pow(0.5, bd);
+        const phaserStep = fq;
+
+        // We need to store lastSample in 'this' to persist across blocks for Sample & Hold
+        if (this.lastSample === undefined) this.lastSample = 0;
+
+        for (let i = 0; i < inputData.length; i++) {
+            this.phaser += phaserStep;
+            if (this.phaser >= 1.0) {
+                this.phaser -= 1.0;
+                this.lastSample = step * Math.floor(inputData[i] / step + 0.5);
+            }
+            outputData[i] = this.lastSample;
+        }
+
+        return true;
+    }
+}
+registerProcessor('bitcrusher-processor', BitcrusherProcessor);
+`;
+
 export class AudioProcessor {
     constructor() {
         this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        this.workletCodeUrl = null; // Store URL for reuse
+        this.initWorklet(this.audioCtx);
+
         this.source = null;
         this.scriptNode = null;
         this.gainNode = null;
@@ -32,6 +135,26 @@ export class AudioProcessor {
 
         // Generate Noise Buffer Once
         this.noiseBuffer = this.createNoiseBuffer();
+    }
+
+    async initWorklet(ctx) {
+        if (!ctx.audioWorklet) return;
+
+        // Create Blob URL only once
+        if (!this.workletCodeUrl) {
+            const blob = new Blob([BITCRUSHER_WORKLET], { type: 'application/javascript' });
+            this.workletCodeUrl = URL.createObjectURL(blob);
+        }
+
+        try {
+            await ctx.audioWorklet.addModule(this.workletCodeUrl);
+            if (ctx === this.audioCtx) {
+                this.workletReady = true;
+                console.log("AudioWorklet 'bitcrusher-processor' loaded main context.");
+            }
+        } catch (e) {
+            console.error("Failed to load AudioWorklet:", e);
+        }
     }
 
     createNoiseBuffer() {
@@ -71,50 +194,49 @@ export class AudioProcessor {
     renderPlayer(filename) {
         const container = document.getElementById('audio-visualizer');
         container.hidden = false;
-        container.classList.add('visualizer-container'); // Center it
+        container.classList.add('visualizer-container');
 
+        // Standard, robust HTML structure
         container.innerHTML = `
             <div class="audio-player-container">
-                <button class="player-btn" id="ap-rewind" title="Rewind 5s">«</button>
-                <button class="btn-main-play" id="ap-play">▶</button>
-                <button class="player-btn" id="ap-forward" title="Forward 5s">»</button>
+                <button class="player-btn btn-main-play" id="ap-play">▶</button>
+                <div class="player-time" id="ap-time">00:00 / 00:00</div>
                 
                 <div class="player-slider-container">
                     <input type="range" class="player-range" id="ap-seek" min="0" max="100" value="0">
                 </div>
                 
-                <div class="player-time" id="ap-time">00:00 / 00:00</div>
-                
-                <div class="player-btn">🔊</div>
-                <input type="range" class="player-range vol-slider" id="ap-vol" min="0" max="1" step="0.05" value="${this.params.gain}">
+                <div class="player-controls-right">
+                    <span class="volume-icon">🔊</span>
+                    <input type="range" class="player-range vol-slider" id="ap-vol" min="0" max="1" step="0.05" value="${this.params.gain}">
+                </div>
             </div>
-            <div style="margin-top:10px; color:var(--text-muted); font-size:0.8rem;">${filename}</div>
+            <div style="margin-top:5px; color:var(--text-muted); font-size:0.75rem; text-align:center;">${filename}</div>
         `;
 
         // Bind Events
         const playBtn = document.getElementById('ap-play');
         const seek = document.getElementById('ap-seek');
         const vol = document.getElementById('ap-vol');
-        const rewind = document.getElementById('ap-rewind');
-        const forward = document.getElementById('ap-forward');
 
-        playBtn.onclick = () => this.toggleIconPlay();
-        rewind.onclick = () => { this.startTime += 5; this.pauseTime -= 5; this.restart(); }; // Simple seek hack
-        forward.onclick = () => { this.startTime -= 5; this.pauseTime += 5; this.restart(); };
+        if (playBtn) playBtn.onclick = () => this.toggleIconPlay();
 
-        seek.oninput = (e) => {
-            // Seeking logic requires restart usually in WebAudio or offset calc
-            const pct = e.target.value / 100;
-            const time = pct * this.buffer.duration;
-            this.seekTo(time);
-        };
+        if (seek) {
+            seek.oninput = (e) => {
+                if (!this.buffer) return;
+                const pct = e.target.value / 100;
+                const time = pct * this.buffer.duration;
+                this.seekTo(time);
+            };
+        }
 
-        vol.oninput = (e) => {
-            this.params.gain = parseFloat(e.target.value);
-            if (this.gainNode) this.gainNode.gain.value = this.params.gain;
-        };
+        if (vol) {
+            vol.oninput = (e) => {
+                this.params.gain = parseFloat(e.target.value);
+                if (this.gainNode) this.gainNode.gain.value = this.params.gain;
+            };
+        }
 
-        // Start Animation Loop for Time/Seek
         this.updatePlayerUI();
     }
 
@@ -249,10 +371,18 @@ export class AudioProcessor {
 
         group.addSlider("BIT DEPTH", 1, 16, this.params.bits, 1, (v) => {
             this.params.bits = v;
+            if (this.workletNode) {
+                const p = this.workletNode.parameters.get('bitDepth');
+                if (p) p.value = v;
+            }
         });
 
         group.addSlider("SAMPLE RATE", 0.01, 1.0, this.params.normFreq, 0.01, (v) => {
             this.params.normFreq = v;
+            if (this.workletNode) {
+                const p = this.workletNode.parameters.get('frequency');
+                if (p) p.value = v;
+            }
         });
 
         group.addSlider("OUTPUT VOL", 0, 1.0, this.params.gain, 0.05, (v) => {
@@ -331,20 +461,27 @@ export class AudioProcessor {
 
     setupGraph(ctx, sourceNode, destination) {
         // NODES CREATION
+        const isLive = (ctx === this.audioCtx);
 
         // 1. Mixer Nodes
         const preMix = ctx.createGain(); // Summing point
 
         // Noise Branch
-        this.noiseNode = ctx.createBufferSource();
-        this.noiseNode.buffer = this.noiseBuffer;
-        this.noiseNode.loop = true;
-        this.noiseGainNode = ctx.createGain();
-        this.noiseGainNode.gain.value = this.params.noise;
-        this.noiseNode.connect(this.noiseGainNode);
-        this.noiseGainNode.connect(preMix);
-        // Start Noise immediately (controlled by gain, but sync start is better in play())
-        try { this.noiseNode.start(0); } catch (e) { }
+        const noiseNode = ctx.createBufferSource();
+        noiseNode.buffer = this.noiseBuffer;
+        noiseNode.loop = true;
+        const noiseGainNode = ctx.createGain();
+        noiseGainNode.gain.value = this.params.noise;
+        noiseNode.connect(noiseGainNode);
+        noiseGainNode.connect(preMix);
+
+        try { noiseNode.start(0); } catch (e) { }
+
+        // Store references only if LIVE context
+        if (isLive) {
+            this.noiseNode = noiseNode;
+            this.noiseGainNode = noiseGainNode;
+        }
 
         // Main Source Connection
         sourceNode.connect(preMix);
@@ -352,49 +489,63 @@ export class AudioProcessor {
         if (sourceNode.playbackRate) sourceNode.playbackRate.value = this.params.speed;
 
         // 2. Distortion
-        this.distortionNode = ctx.createWaveShaper();
-        this.distortionNode.curve = this.makeDistortionCurve(this.params.saturation * 100); // 0-100 amount
-        this.distortionNode.oversample = '4x';
+        const distortionNode = ctx.createWaveShaper();
+        distortionNode.curve = this.makeDistortionCurve(this.params.saturation * 100);
+        distortionNode.oversample = '4x';
+
+        if (isLive) this.distortionNode = distortionNode;
 
         // 3. Filter
-        this.filterNode = ctx.createBiquadFilter();
-        this.filterNode.type = 'lowpass';
-        this.filterNode.frequency.value = this.params.cutoff;
-        this.filterNode.Q.value = this.params.resonance;
+        const filterNode = ctx.createBiquadFilter();
+        filterNode.type = 'lowpass';
+        filterNode.frequency.value = this.params.cutoff;
+        filterNode.Q.value = this.params.resonance;
 
-        // 4. Bitcrusher (ScriptProcessor)
-        const bufferSize = 4096;
-        this.scriptNode = ctx.createScriptProcessor(bufferSize, 1, 1);
-        this.scriptNode.onaudioprocess = (e) => {
-            const input = e.inputBuffer.getChannelData(0);
-            const output = e.outputBuffer.getChannelData(0);
+        if (isLive) this.filterNode = filterNode;
 
-            const step = Math.pow(0.5, this.params.bits);
-            const phaserStep = this.params.normFreq;
-            let phaser = 0;
-            let lastSample = 0;
+        // 4. Bitcrusher (AudioWorklet)
+        let scriptNode;
+        let useWorklet = false;
 
-            for (let i = 0; i < input.length; i++) {
-                phaser += phaserStep;
-                if (phaser >= 1.0) {
-                    phaser -= 1.0;
-                    lastSample = input[i];
-                    lastSample = step * Math.floor(lastSample / step + 0.5);
+        // Check availability
+        if (isLive && this.workletReady) useWorklet = true;
+        else if (ctx instanceof OfflineAudioContext) useWorklet = true; // Assumed 
+
+        if (useWorklet) {
+            try {
+                const workletNode = new AudioWorkletNode(ctx, 'bitcrusher-processor');
+                const bitParam = workletNode.parameters.get('bitDepth');
+                const freqParam = workletNode.parameters.get('frequency');
+                if (bitParam) bitParam.value = this.params.bits;
+                if (freqParam) freqParam.value = this.params.normFreq;
+
+                scriptNode = workletNode;
+                if (isLive) {
+                    this.workletNode = workletNode;
+                    this.scriptNode = workletNode;
                 }
-                output[i] = lastSample;
+            } catch (e) {
+                console.warn("Worklet failed", e);
+                scriptNode = ctx.createGain();
+                if (isLive) this.scriptNode = scriptNode;
             }
-        };
+        } else {
+            scriptNode = ctx.createGain();
+            if (isLive) this.scriptNode = scriptNode;
+        }
 
         // 5. Master Gain
-        this.gainNode = ctx.createGain();
-        this.gainNode.gain.value = this.params.gain;
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = this.params.gain;
 
-        // CONNECTIONS: PreMix -> Distortion -> Filter -> Bitcrush -> Gain -> Dest
-        preMix.connect(this.distortionNode);
-        this.distortionNode.connect(this.filterNode);
-        this.filterNode.connect(this.scriptNode);
-        this.scriptNode.connect(this.gainNode);
-        this.gainNode.connect(destination);
+        if (isLive) this.gainNode = gainNode;
+
+        // CONNECTIONS
+        preMix.connect(distortionNode);
+        distortionNode.connect(filterNode);
+        filterNode.connect(scriptNode);
+        scriptNode.connect(gainNode);
+        gainNode.connect(destination);
     }
 
     makeDistortionCurve(amount) {
@@ -423,20 +574,16 @@ export class AudioProcessor {
         btn.textContent = "PROCESSING... 0%";
 
         const offlineCtx = new OfflineAudioContext(
-            1, // Mono for now due to ScriptProcessor logic simplicity (inputBuffer ch 0)
+            1, // Mono
             this.buffer.length,
             this.buffer.sampleRate
         );
 
+        // Load Worklet into Offline Context
+        await this.initWorklet(offlineCtx);
+
         const source = offlineCtx.createBufferSource();
         source.buffer = this.buffer;
-
-        // ScriptProcessor is tricky in OfflineContext, but supported in many browsers.
-        // However, it runs on main thread. Large files might freeze UI.
-        // 'suspend' logic allows progress update? Not easily with ScriptProcessor.
-        // We will simulate progress bar for short files, or standard wait.
-
-        // NOTE: ScriptProcessor in OfflineAudioContext fires the entire buffer in chunks.
 
         this.setupGraph(offlineCtx, source, offlineCtx.destination);
         source.start(0);

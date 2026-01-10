@@ -4,71 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOID | CORUPTION SUITE</title>
+    <title>VOID | CORRUPTION SUITE</title>
     <link rel="stylesheet" href="style.css">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap"
         rel="stylesheet">
-    <style>
-        /* Specific overrides or additions for minimal suite */
-        .suite-container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 40px 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 40px;
-        }
-
-        .tool-card {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-light);
-            padding: 20px;
-        }
-
-        .tool-header {
-            border-bottom: 1px solid var(--border-light);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .tool-title {
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: var(--accent-primary);
-        }
-
-        .input-group {
-            margin-bottom: 15px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .input-group label {
-            width: 120px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.9rem;
-        }
-
-        input[type="number"] {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-dim);
-            color: var(--text-main);
-            padding: 5px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        select {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-dim);
-            color: var(--text-main);
-            padding: 5px;
-        }
-    </style>
 </head>
 
 <body>
@@ -89,58 +29,76 @@
             </div>
         </header>
 
-        <main class="suite-container">
+        <main class="workspace" style="justify-content: center; align-items: flex-start; padding: 40px; overflow-y: auto;">
+            
+            <div style="width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px;">
 
-            <!-- TOOL 1: FAKE FILE MAKER -->
-            <section class="tool-card">
-                <div class="tool-header">
-                    <div class="tool-title">FAKE FILE MAKER</div>
-                    <div class="tool-status">Create massive dummy files</div>
-                </div>
-                <div class="tool-body">
-                    <div class="input-group">
-                        <label>SIZE:</label>
-                        <input type="number" id="fake-size" value="10" min="1">
-                        <select id="fake-unit">
-                            <option value="KB">KB</option>
-                            <option value="MB" selected>MB</option>
-                            <option value="GB">GB</option>
-                        </select>
+                <!-- TOOL 1: FAKE FILE MAKER -->
+                <div class="module-group">
+                    <div class="module-header">
+                        <h3>FAKE FILE MAKER</h3>
+                        <span style="font-size: 0.8rem; opacity: 0.6; margin-left: auto;">Create massive dummy files</span>
                     </div>
-                    <div class="input-group">
-                        <label>FILENAME:</label>
-                        <input type="text" id="fake-name" value="corrupted_data.bin">
-                    </div>
-                    <button class="btn btn-primary" id="btn-fake-gen" style="width:100%">GENERATE & DOWNLOAD</button>
-                    <div id="fake-status"
-                        style="margin-top:10px; font-family:'JetBrains Mono'; font-size:0.8rem; color: #888;"></div>
-                </div>
-            </section>
+                    <div class="module-content">
+                        
+                        <div class="control-item">
+                            <label>SIZE</label>
+                            <div style="display: flex; gap: 10px; width: 100%;">
+                                <input type="number" id="fake-size" value="10" min="1" style="flex: 1;">
+                                <select id="fake-unit" style="width: 80px;">
+                                    <option value="KB">KB</option>
+                                    <option value="MB" selected>MB</option>
+                                    <option value="GB">GB</option>
+                                </select>
+                            </div>
+                        </div>
 
-            <!-- TOOL 2: FILE CORRUPTOR -->
-            <section class="tool-card">
-                <div class="tool-header">
-                    <div class="tool-title">FILE CORRUPTOR</div>
-                    <div class="tool-status">Destroy file integrity</div>
+                        <div class="control-item">
+                            <label>FILENAME</label>
+                            <input type="text" id="fake-name" value="corrupted_data.bin">
+                        </div>
+
+                        <div class="control-item">
+                            <button class="btn btn-primary" id="btn-fake-gen" style="width:100%">GENERATE & DOWNLOAD</button>
+                            <div id="fake-status" style="margin-top:10px; font-family:'JetBrains Mono'; font-size:0.8rem; color: var(--accent-secondary); text-align: center; height: 1em;"></div>
+                        </div>
+
+                    </div>
                 </div>
-                <div class="tool-body">
-                    <div class="input-group">
-                        <label>TARGET:</label>
-                        <input type="file" id="corrupt-input">
+
+                <!-- TOOL 2: FILE CORRUPTOR -->
+                <div class="module-group">
+                     <div class="module-header">
+                        <h3>FILE CORRUPTOR</h3>
+                        <span style="font-size: 0.8rem; opacity: 0.6; margin-left: auto;">Destroy file integrity</span>
                     </div>
-                    <div class="input-group">
-                        <label>INTENSITY:</label>
-                        <input type="range" id="corrupt-amt" min="0.01" max="5" step="0.1" value="0.5">
-                        <span id="corrupt-val">0.5%</span>
+                    <div class="module-content">
+                        
+                         <div class="control-item">
+                            <label>TARGET FILE</label>
+                            <input type="file" id="corrupt-input" style="padding: 10px; background: rgba(0,0,0,0.2); border: 1px dashed var(--border-dim); width: 100%;">
+                        </div>
+
+                        <div class="control-item">
+                            <label>INTENSITY</label>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <input type="range" id="corrupt-amt" min="0.01" max="5" step="0.1" value="0.5" style="flex: 1;">
+                                <span id="corrupt-val" style="font-family: 'JetBrains Mono'; width: 50px; text-align: right;">0.5%</span>
+                            </div>
+                            <div style="font-size: 0.7rem; color: #888; margin-top: 5px;">
+                                Replaces random bytes with garbage data. Higher intensity = more destruction.
+                            </div>
+                        </div>
+
+                        <div class="control-item">
+                            <button class="btn btn-primary" id="btn-corrupt-gen" style="width:100%">CORRUPT & DOWNLOAD</button>
+                            <div id="corrupt-status" style="margin-top:10px; font-family:'JetBrains Mono'; font-size:0.8rem; color: var(--accent-secondary); text-align: center; height: 1em;"></div>
+                        </div>
+
                     </div>
-                    <div class="input-group" style="font-size: 0.8rem; color: #aaa;">
-                        Replaces random bytes with garbage data. Higher intensity = more destruction.
-                    </div>
-                    <button class="btn btn-primary" id="btn-corrupt-gen" style="width:100%">CORRUPT & DOWNLOAD</button>
-                    <div id="corrupt-status"
-                        style="margin-top:10px; font-family:'JetBrains Mono'; font-size:0.8rem; color: #888;"></div>
                 </div>
-            </section>
+
+            </div>
 
         </main>
     </div>
