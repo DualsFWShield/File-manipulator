@@ -23,7 +23,9 @@ export const PreProcessEffect = {
         saturation: 100, // %
         brightness: 0,
         hue: 0, // -180 to 180
-        invert: false
+        invert: false,
+        invertMode: 'normal', // 'normal', 'luma', 'hue'
+        intensity: 0, // Vibrance/Pop -100 to 100
     },
 
     getControls: (builder, params, onUpdate) => {
@@ -38,7 +40,16 @@ export const PreProcessEffect = {
         group.addSlider("SATURATION %", 0, 200, params.saturation, 5, (v) => onUpdate('saturation', v));
         group.addSlider("BRIGHTNESS", -100, 100, params.brightness, 1, (v) => onUpdate('brightness', v));
         group.addSlider("HUE SHIFT", -180, 180, params.hue, 5, (v) => onUpdate('hue', v));
-        group.addToggle("INVERT COLORS", params.invert, (v) => onUpdate('invert', v));
+        group.addSlider("INTENSITY (Vibrance)", -100, 100, params.intensity, 5, (v) => onUpdate('intensity', v));
+
+        group.addToggle("INVERT ENABLED", params.invert, (v) => onUpdate('invert', v));
+        if (params.invert) {
+            group.addSelect("INVERT MODE", [
+                { label: "Normal (Negative)", value: 'normal' },
+                { label: "Smart Luma (Preserve Color)", value: 'luma' },
+                { label: "Smart Hue (Complementary)", value: 'hue' }
+            ], params.invertMode, (v) => onUpdate('invertMode', v));
+        }
 
         // DETAIL
         group.addSlider("BLUR RADIUS", 0, 20, params.blurRadius, 0.5, (v) => onUpdate('blurRadius', v));
@@ -79,6 +90,48 @@ export const PreProcessEffect = {
         const bright = params.brightness;
         const hueShift = params.hue;
         const invert = params.invert;
+        const invMode = params.invertMode || 'normal';
+        const intensity = params.intensity; // Logic: Adaptive Saturation adjustment
+
+        // Helpers for HSL
+        const rgbToHsl = (r, g, b) => {
+            r /= 255; g /= 255; b /= 255;
+            let max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h, s, l = (max + min) / 2;
+            if (max == min) h = s = 0;
+            else {
+                let d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                }
+                h /= 6;
+            }
+            return [h, s, l];
+        };
+
+        const hslToRgb = (h, s, l) => {
+            let r, g, b;
+            if (s === 0) r = g = b = l;
+            else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1 / 6) return p + (q - p) * 6 * t;
+                    if (t < 1 / 2) return q;
+                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                    return p;
+                };
+                let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                let p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+            return [r * 255, g * 255, b * 255];
+        };
 
         // Hue rotation helper (approximate for speed or full RGB->HSL->RGB?)
         // Full HSL is better for "Hue Shift". 
@@ -100,62 +153,57 @@ export const PreProcessEffect = {
             // 2b. Brightness
             r += bright; g += bright; b += bright;
 
-            // 2c. Invert
-            if (invert) {
+            // 2c. Invert & Color Logic
+            // Complex color ops require HSL conversion
+            // Trigger if: Hue, Saturation, Invert (Smart), or Intensity
+
+            let needsHSL = (hueShift !== 0 || satMult !== 1.0 || (invert && invMode !== 'normal') || intensity !== 0);
+
+            if (invert && invMode === 'normal') {
                 r = 255 - r;
                 g = 255 - g;
                 b = 255 - b;
             }
 
-            // 2d. Hue & Saturation
-            // Only expensive math if needed
-            if (hueShift !== 0 || satMult !== 1.0) {
-                // RGB to HSL
-                let R = r / 255, G = g / 255, B = b / 255;
-                let max = Math.max(R, G, B), min = Math.min(R, G, B);
-                let h, s, l = (max + min) / 2;
+            if (needsHSL) {
+                let [h, s, l] = rgbToHsl(r, g, b);
 
-                if (max === min) {
-                    h = s = 0;
-                } else {
-                    let d = max - min;
-                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                    switch (max) {
-                        case R: h = (G - B) / d + (G < B ? 6 : 0); break;
-                        case G: h = (B - R) / d + 2; break;
-                        case B: h = (R - G) / d + 4; break;
-                    }
-                    h /= 6;
+                // Hue Shift
+                if (hueShift !== 0) {
+                    h += hueShift / 360;
+                    if (h > 1) h -= 1; else if (h < 0) h += 1;
                 }
 
-                // Modify H & S
-                h += hueShift / 360;
-                if (h > 1) h -= 1;
-                if (h < 0) h += 1;
+                // Saturation (Global)
                 s *= satMult;
 
-                // HSL to RGB
-                let r1, g1, b1;
-                if (s === 0) {
-                    r1 = g1 = b1 = l;
-                } else {
-                    const hue2rgb = (p, q, t) => {
-                        if (t < 0) t += 1;
-                        if (t > 1) t -= 1;
-                        if (t < 1 / 6) return p + (q - p) * 6 * t;
-                        if (t < 1 / 2) return q;
-                        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-                        return p;
-                    };
-                    let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                    let p = 2 * l - q;
-                    r1 = hue2rgb(p, q, h + 1 / 3);
-                    g1 = hue2rgb(p, q, h);
-                    b1 = hue2rgb(p, q, h - 1 / 3);
+                // Intensity / Vibrance
+                // Vibrance boosts lower saturation colors more than high saturation
+                if (intensity !== 0) {
+                    const v = intensity / 100;
+                    if (v > 0) {
+                        s += (1 - s) * v * 0.5; // Boost
+                    } else {
+                        s += s * v; // Reduce
+                    }
                 }
-                r = r1 * 255;
-                g = g1 * 255;
-                b = b1 * 255;
+
+                // Smart Invert
+                if (invert) {
+                    if (invMode === 'luma') {
+                        l = 1.0 - l; // Invert Lightness, Keep Hue/Sat
+                    } else if (invMode === 'hue') {
+                        h = (h + 0.5) % 1.0; // Rotate Hue 180, Keep Lightness
+                        // Usually complementary colors
+                    }
+                }
+
+                // Clamp
+                s = Math.max(0, Math.min(1, s));
+                l = Math.max(0, Math.min(1, l));
+
+                let rgb = hslToRgb(h, s, l);
+                r = rgb[0]; g = rgb[1]; b = rgb[2];
             }
 
             // 2e. Noise

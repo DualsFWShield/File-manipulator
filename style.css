@@ -309,6 +309,7 @@ body {
 /* Styling Range Sliders */
 input[type=range] {
     -webkit-appearance: none;
+    appearance: none;
     width: 100%;
     background: transparent;
 }
@@ -349,4 +350,95 @@ select {
 
 select:focus {
     border-color: var(--accent-primary);
+}
+
+/* Mobile Optimization */
+@media (max-width: 768px) {
+
+    /* Layout Switch: Stacked */
+    .app-container {
+        height: 100vh;
+        /* Ensure full viewport */
+        overflow: hidden;
+    }
+
+    .workspace {
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* 1. Header */
+    .app-header {
+        padding: 0 10px;
+        height: 50px;
+    }
+
+    .logo h1 {
+        font-size: 1rem;
+    }
+
+    .header-controls .btn {
+        font-size: 0.7rem;
+        padding: 6px 10px;
+    }
+
+    /* 2. Preview Area (Top Half) */
+    .preview-area {
+        flex: 0 0 50%;
+        /* Fixed height ratio */
+        border-bottom: 1px solid var(--border-light);
+    }
+
+    /* 3. Controls (Bottom Half) */
+    .panel.control-panel {
+        width: 100%;
+        flex: 1;
+        /* Take remaining space */
+        border-right: none;
+        overflow-y: auto;
+    }
+
+    .modules-rack {
+        padding-bottom: 40px;
+        /* Space for scroll */
+    }
+
+    /* Touch Targets */
+    input[type=range]::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+        margin-top: -11px;
+        /* Center on 2px track */
+    }
+
+    .control-item {
+        margin-bottom: 15px;
+        /* More spacing */
+    }
+
+    .panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .module-header {
+        padding: 15px;
+        /* Bigger tap area */
+    }
+
+    .module-group {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
+    /* Batch Drop Zone */
+    .batch-drop-zone {
+        padding: 15px;
+    }
+
+    .batch-drop-zone h3 {
+        font-size: 0.9rem;
+    }
 }

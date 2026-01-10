@@ -71,7 +71,9 @@ export class UIBuilder {
             addToggle: (label, value, onChange) => this.addToggle(content, label, value, onChange),
             addColor: (label, value, onChange) => this.addColor(content, label, value, onChange),
             addNumber: (label, value, onChange) => this.addNumber(content, label, value, onChange),
-            addDescription: (text) => this.addDescription(content, text)
+            addDescription: (text) => this.addDescription(content, text),
+            createButton: (label, onClick) => this.addButton(content, label, onClick), // Alias for consistency with caller
+            addButton: (label, onClick) => this.addButton(content, label, onClick)
         };
     }
 
@@ -196,8 +198,28 @@ export class UIBuilder {
             onChange(parseFloat(e.target.value));
         });
 
+        input.addEventListener('change', (e) => {
+            onChange(parseFloat(e.target.value));
+        });
+
         wrapper.appendChild(label);
         wrapper.appendChild(input);
+        parent.appendChild(wrapper);
+    }
+
+    addButton(parent, labelText, onClick) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'control-item control-button';
+
+        const btn = document.createElement('button');
+        btn.textContent = labelText;
+        btn.className = 'btn btn-secondary';
+        btn.style.width = '100%';
+        btn.style.marginTop = '5px';
+
+        btn.onclick = onClick;
+
+        wrapper.appendChild(btn);
         parent.appendChild(wrapper);
     }
 }

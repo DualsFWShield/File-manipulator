@@ -7,6 +7,8 @@ import { Recorder } from './utils/Recorder.js';
 import { Animator } from './animator/Animator.js';
 import { VideoExporter } from './utils/VideoExporter.js';
 import { WebGLManager } from './webgl/WebGLManager.js';
+import { SeparationExporter } from './utils/SeparationExporter.js';
+import { BatchManager } from './utils/BatchManager.js';
 
 export class ImageProcessor {
     constructor(canvas) {
@@ -112,7 +114,13 @@ export class ImageProcessor {
         // UI & Animation
         this.generateUI();
         if (!this.animator) this.animator = new Animator(this);
-        else this.animator.setupUI(); // Re-add animation controls
+        else this.animator.setupUI();
+
+        // Batch Manager
+        if (!this.batchManager) {
+            this.batchManager = new BatchManager(this);
+            this.batchManager.initUI('ui-container'); // Appends to main container
+        }
 
         // Controls
         document.getElementById('export-btn').disabled = false;
@@ -255,7 +263,9 @@ export class ImageProcessor {
 
     setupPreview(img) {
         // LIMIT PREVIEW SIZE FOR PERFORMANCE
-        const maxPreview = 960;
+        // Dynamic Mobile Optimization
+        const isMobile = window.innerWidth <= 768;
+        const maxPreview = isMobile ? 600 : 960; // Reduce load on mobile GPU
 
         let w = img.width;
         let h = img.height;
@@ -306,6 +316,9 @@ export class ImageProcessor {
         ], this.exportSettings.format, (v) => {
             this.exportSettings.format = v;
         });
+
+        // SEPARATION EXPORT
+        expGroup.createButton("EXPORT SEPARATIONS (ZIP)", () => this.exportSeparations());
 
         expGroup.addSlider("QUALITY", 0.1, 1.0, this.exportSettings.quality, 0.1, (v) => {
             this.exportSettings.quality = v;
@@ -798,39 +811,105 @@ export class ImageProcessor {
         const eCtx = exportCanvas.getContext('2d');
 
         // Draw Source based on Background Mode
+        // ... (Existing export code handled by simple logic below)
+
+        // RE-RUN PIPELINE FOR EXPORT RESOLUTION
+        // This ensures effects scale properly.
+
+        // 1. Clear
         if (this.backgroundMode === 'color') {
             eCtx.fillStyle = this.backgroundColor;
             eCtx.fillRect(0, 0, w, h);
         } else if (this.backgroundMode === 'image') {
             eCtx.drawImage(this.originalImage, 0, 0, w, h);
         }
-        // Transparent: do nothing (already empty)
+
+        // 2. Process
+        this.pipeline.forEach(effect => {
+            // Need to adjust params if they scale?
+            // Most params are relative or pixel based. 
+            // e.g. defined DPI/Resolution in Dither is factor of size.
+            // But PreProcess Blur is px. 
+            // We pass 'exportScale' to process() so effects can scale their px values.
+            effect.process(eCtx, w, h, this.state[effect.id], exportScale);
+        });
+
+        // 3. Download
+        const format = set.format === 'jpg' ? 'image/jpeg' : (set.format === 'webp' ? 'image/webp' : 'image/png');
+        const ext = set.format === 'ico' ? 'png' : set.format; // ico is just weird png here
+
+        const dataURL = exportCanvas.toDataURL(format, set.quality);
+        const link = document.createElement('a');
+        link.download = `VOID_EXPORT_${Date.now()}.${ext}`;
+        link.href = dataURL;
+        link.click();
+    }
+
+    async exportSeparations() {
+        if (!this.originalImage) return;
+
+        const ditherState = this.state['dither_v1'];
+        if (!ditherState || !ditherState.enabled) {
+            alert("Please enable Dither Engine (Grade or Tonal) to export separations.");
+            return;
+        }
 
         this.toggleLoading(true);
-        // Defer processing to let UI update
-        setTimeout(() => {
-            try {
-                this.pipeline.forEach(effect => {
-                    effect.process(eCtx, w, h, this.state[effect.id], exportScale);
-                });
 
-                const link = document.createElement('a');
-                const ext = set.format === 'ico' ? 'ico' : set.format;
-                let mime = `image/${set.format}`;
-                if (set.format === 'jpg') mime = 'image/jpeg';
-                if (set.format === 'ico') mime = 'image/png'; // Browsers export PNG for ICO usually
+        try {
+            // 1. Prepare Full Res Canvas
+            const w = this.originalImage.naturalWidth;
+            const h = this.originalImage.naturalHeight;
+            const cvs = document.createElement('canvas');
+            cvs.width = w; cvs.height = h;
+            const ctx = cvs.getContext('2d');
 
-                link.download = `VOID_EXPORT_${Date.now()}.${ext}`;
-                link.href = exportCanvas.toDataURL(mime, set.format === 'png' ? undefined : set.quality);
-                link.click();
+            // Draw Source
+            ctx.drawImage(this.originalImage, 0, 0, w, h);
 
-                exportCanvas.width = 1;
-            } catch (err) {
-                console.error(err);
-                alert("Export Failed: " + err.message);
-            } finally {
-                this.toggleLoading(false);
+            // Apply Pipeline (Same as Export) to get the final Dithered look
+            // But we might want ONLY the dither effect? 
+            // Usually separation is based on the FINAL look.
+            // So Apply PreProcess -> Halftone -> Dither
+            // But NOT Glitch? Glitch ruins separation usually.
+            // Let's ask pipeline to process up to Dither.
+
+            const scale = w / this.canvas.width;
+
+            for (let effect of this.pipeline) {
+                if (effect.id === 'glitch_v1') continue; // Skip Glitch for separation safety? User might want it though.
+                // Let's include everything that affects color.
+                effect.process(ctx, w, h, this.state[effect.id], scale);
             }
-        }, 50);
+
+            // 2. Generate Maps
+            const layers = await SeparationExporter.generate(cvs, ditherState); // returns { filename: blob }
+
+            // 3. Zip
+            if (!window.JSZip) throw new Error("JSZip library not loaded.");
+            const zip = new JSZip();
+
+            // Add files
+            for (let [name, blob] of Object.entries(layers)) {
+                zip.file(`${name}.png`, blob);
+            }
+
+            const content = await zip.generateAsync({ type: "blob" });
+
+            // 4. Download
+            const url = URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `VOID_SEPARATIONS_${Date.now()}.zip`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+        } catch (e) {
+            alert("Separation Export Failed: " + e.message);
+            console.error(e);
+        } finally {
+            this.toggleLoading(false);
+        }
     }
 }
+

@@ -1,3 +1,6 @@
+import { Palettes, getPaletteVec3 } from '../utils/Palettes.js';
+import { ColorQuantizer } from '../utils/ColorQuantizer.js';
+
 /**
  * DitherEffect - Optimized V2 with RGB support, Tonal & Grade Modes.
  */
@@ -10,42 +13,53 @@ export const DitherEffect = {
         enabled: true,
         // Common
         resolution: 1.0,
-        algorithm: 'floyd', // floyd, atkinson, sierra, bayer4, bayer8, modulation, stitched
-        resampling: 'nearest', // 'nearest', 'preserve'
+        algorithm: 'floyd', // floyd, atkinson, sierra, bayer4, bayer8, modulation, stitched, thread, bitwave, grid
+        resampling: 'nearest',
 
         // Mode: 'tonal' or 'grade'
         renderMode: 'tonal',
 
         // Tonal Mode Params
-        // Luminance-based mapping
-        // Logic: 3-Stop Gradient Map. Luma < 128 (Shadow->Mid), Luma > 128 (Mid->Highlight)
+        // Custom 3-Stop Gradient or simple Threshold
+        // New: Thresholding handles
+        lumaLow: 60, // 0-255
+        lumaHigh: 190, // 0-255
         colorShadow: '#000000',
         colorMid: '#808080',
         colorHighlight: '#ffffff',
 
         // Grade Mode Params
         // Color quantization
-        colorSpace: 'indexed', // 'indexed', 'rgb'
-        indexedCount: 16, // 2-64
+        palette: 'bw_1bit', // Key from Palettes.js
+        colorSpace: 'palette', // 'palette', 'rgb'
+        indexedCount: 16, // If auto-extract
         contrast: 0,
 
         // Algorithmic Tweaks
-        spread: 1.0,  // For Grid/Pattern algorithms
-        bleeding: 0.0, // Spread error deeper (for err diff) or blur dots (for pattern)
-        roundness: 0.0, // Shaping for patterns (Not easily doable in 2D array loop, simulation via pre-blur of source?)
+        spread: 1.0,
+        bleeding: 0.0,
+        roundness: 0.0, // Post-process blur+threshold
 
         // Advanced
-        knockout: false, // Make background (Shadow color?) transparent
+        knockout: false,
     },
 
     getControls: (builder, params, onUpdate) => {
         const group = builder.createModuleGroup("DITHERING ENGINE", (enabled) => onUpdate('enabled', enabled), DitherEffect.description);
 
+        const refreshUI = (mode) => {
+            if (tonalDiv) tonalDiv.style.display = mode === 'tonal' ? 'block' : 'none';
+            if (gradeDiv) gradeDiv.style.display = mode === 'grade' ? 'block' : 'none';
+        };
+
         // --- MAIN RENDER SETTINGS ---
         group.addSelect("RENDER MODE", [
-            { label: "TONAL (Luminance Map)", value: "tonal" },
+            { label: "TONAL (Luminance Gradient)", value: "tonal" },
             { label: "GRADE (Color Palette)", value: "grade" }
-        ], params.renderMode, (v) => onUpdate('renderMode', v));
+        ], params.renderMode, (v) => {
+            onUpdate('renderMode', v);
+            refreshUI(v); // Trigger Visibility toggle
+        });
 
         group.addSelect("ALGORITHM", [
             { label: "None (Pixelate)", value: "none" },
@@ -54,42 +68,56 @@ export const DitherEffect = {
             { label: "Sierra Lite (Speed)", value: "sierra" },
             { label: "Bayer 4x4 (Grid)", value: "bayer4" },
             { label: "Bayer 8x8 (Fine)", value: "bayer8" },
-            { label: "Modulation (Sine)", value: "modulation" },
-            { label: "Stitched (Fabric)", value: "stitched" }
+            { label: "Thread (Linear)", value: "thread" },
+            { label: "Bitwave (Sine)", value: "bitwave" },
+            { label: "Grid Modulation (Cross)", value: "grid" },
+            { label: "Stitched (Rug)", value: "stitched" }
         ], params.algorithm, (v) => onUpdate('algorithm', v));
 
         group.addSlider("RESOLUTION / DPI", 0.05, 1.0, params.resolution, 0.05, (v) => onUpdate('resolution', v));
-        // group.addSelect("RESAMPLING", [{label:"Nearest", value:'nearest'}, {label:"Preserve", value:'preserve'}], params.resampling, v=>onUpdate('resampling', v));
 
-        // --- DYNAMIC CONTROLS ---
-        if (params.renderMode === 'tonal') {
-            // TONAL CONTROLS
-            group.addDescription(group.content, "Map grayscale values to a custom 3-color gradient.");
-            if (builder.addColor) {
-                group.addColor("HIGHLIGHT (Light)", params.colorHighlight, (v) => onUpdate('colorHighlight', v));
-                group.addColor("MIDTONE (Mid)", params.colorMid, (v) => onUpdate('colorMid', v));
-                group.addColor("SHADOW (Dark)", params.colorShadow, (v) => onUpdate('colorShadow', v));
-            }
-        } else {
-            // GRADE CONTROLS
-            group.addDescription(group.content, "Reduce colors to a palette or RGB quantization.");
-            group.addSelect("d-cs", [ // d-cs id helps avoiding key clashes? no UIBuilder doesn't use IDs
-                { label: "INDEXED (Limited Palette)", value: 'indexed' },
-                { label: "RGB (Channel Quant)", value: 'rgb' }
-            ], params.colorSpace, (v) => onUpdate('colorSpace', v));
+        // --- CONTAINERS ---
+        const tonalDiv = document.createElement('div');
+        tonalDiv.className = 'sub-group_tonal';
+        group.content.appendChild(tonalDiv);
 
-            if (params.colorSpace === 'indexed') {
-                group.addSlider("COLORS COUNT", 2, 64, params.indexedCount, 1, (v) => onUpdate('indexedCount', v));
-            }
+        const gradeDiv = document.createElement('div');
+        gradeDiv.className = 'sub-group_grade';
+        group.content.appendChild(gradeDiv);
 
-            group.addSlider("CONTRAST", -100, 100, params.contrast, 1, (v) => onUpdate('contrast', v));
+        // --- POPULATE TONAL ---
+        builder.addDescription(tonalDiv, "Map grayscale to gradient. Tweaking Mid-Points.");
+        builder.addSlider(tonalDiv, "LUMA LOW (Shadow Cut)", 0, 255, params.lumaLow, 1, (v) => onUpdate('lumaLow', v));
+        builder.addSlider(tonalDiv, "LUMA HIGH (Highlight Cut)", 0, 255, params.lumaHigh, 1, (v) => onUpdate('lumaHigh', v));
+
+        if (builder.addColor) {
+            builder.addColor(tonalDiv, "HIGHLIGHT", params.colorHighlight, (v) => onUpdate('colorHighlight', v));
+            builder.addColor(tonalDiv, "MIDTONE", params.colorMid, (v) => onUpdate('colorMid', v));
+            builder.addColor(tonalDiv, "SHADOW", params.colorShadow, (v) => onUpdate('colorShadow', v));
         }
 
-        // --- ADVANCED ---
-        if (params.algorithm.startsWith('bayer') || params.algorithm === 'modulation' || params.algorithm === 'stitched') {
+        // --- POPULATE GRADE ---
+        builder.addDescription(gradeDiv, "Quantize colors to a palette.");
+        const palOptions = Object.keys(Palettes).map(k => ({ label: Palettes[k].name, value: k }));
+        palOptions.unshift({ label: "AUTO (Extract 16)", value: 'extract_16' });
+        palOptions.unshift({ label: "AUTO (Extract 4)", value: 'extract_4' });
+        palOptions.unshift({ label: "AUTO (Extract 64)", value: 'extract_64' });
+
+        builder.addSelect(gradeDiv, "PALETTE", palOptions, params.palette, (v) => onUpdate('palette', v));
+        builder.addSlider(gradeDiv, "CONTRAST", -100, 100, params.contrast, 1, (v) => onUpdate('contrast', v));
+
+        // Initial Visibility
+        refreshUI(params.renderMode);
+
+        // --- COMMON ADVANCED ---
+        // Append to main group again
+        group.addSlider("ROUNDING (Stylize)", 0.0, 1.0, params.roundness, 0.05, (v) => onUpdate('roundness', v));
+
+        if (['bayer4', 'bayer8', 'bitwave', 'grid', 'stitched', 'thread'].includes(params.algorithm)) {
             group.addSlider("SPREAD / BIAS", 0.1, 5.0, params.spread, 0.1, (v) => onUpdate('spread', v));
         }
 
+        group.addSlider("BLEEDING", 0.0, 1.0, params.bleeding, 0.05, (v) => onUpdate('bleeding', v));
         group.addToggle("KNOCKOUT BG", params.knockout, (v) => onUpdate('knockout', v));
     },
 
@@ -106,11 +134,22 @@ export const DitherEffect = {
         tempCanvas.height = h;
         const tCtx = tempCanvas.getContext('2d');
 
-        tCtx.imageSmoothingEnabled = params.resampling === 'preserve'; // "Preserve" ~ Bilinear? or Smart? Nearest is standard.
+        tCtx.imageSmoothingEnabled = params.resampling === 'preserve';
         tCtx.drawImage(ctx.canvas, 0, 0, w, h);
 
         const imageData = tCtx.getImageData(0, 0, w, h);
         const data = imageData.data;
+
+        // PREPARE PALETTE (If Grade Mode)
+        let activePalette = null;
+        if (params.renderMode === 'grade') {
+            if (params.palette.startsWith('extract')) {
+                const count = parseInt(params.palette.split('_')[1]);
+                activePalette = ColorQuantizer.extract(imageData, count, 'kmeans'); // Use K-Means
+            } else {
+                activePalette = getPaletteVec3(params.palette);
+            }
+        }
 
         const factorContrast = (259 * (params.contrast + 255)) / (255 * (259 - params.contrast));
 
@@ -118,13 +157,67 @@ export const DitherEffect = {
         const palTonal = {
             shadow: hexToRgb(params.colorShadow || '#000000'),
             mid: hexToRgb(params.colorMid || '#808080'),
-            high: hexToRgb(params.colorHighlight || '#ffffff')
+            high: hexToRgb(params.colorHighlight || '#ffffff'),
+            lowCut: params.lumaLow,
+            highCut: params.lumaHigh
         };
 
         // --- PROCESS LOOP ---
-        applyEffectLoop(data, w, h, params, factorContrast, palTonal);
-
+        applyEffectLoop(data, w, h, params, factorContrast, palTonal, activePalette);
         tCtx.putImageData(imageData, 0, 0);
+
+        // --- ROUNDING (Post-Process) ---
+        if (params.roundness > 0) {
+            // "Gooey" effect: Blur -> Threshold
+            // Radius depends on resolution. 1.0 = ~2px blur?
+            const blurRad = params.roundness * 2 * params.resolution;
+            if (blurRad > 0.2) {
+                // We need to draw the dithered pixels, blur them, then threshold back.
+                // Draw back to temp Canvas? tCtx already has data.
+                // Draw to 'ctx' (dest) then blur?
+
+                // 1. Blur
+                // Need a fresh context to blur?
+                // Use 'ctx' as scratch? No, 'ctx' is destination size.
+                // Blur on tCtx (Downscaled) gives better rounding relative to pixel grid.
+
+                tCtx.filter = `blur(${blurRad}px)`;
+                tCtx.globalCompositeOperation = 'source-over';
+                tCtx.drawImage(tempCanvas, 0, 0); // Self-draw to blur?
+                tCtx.filter = 'none';
+
+                // 2. Threshold (Cutoff to make sharp edges again)
+                // Access pixels again
+                const pData = tCtx.getImageData(0, 0, w, h);
+                const d = pData.data;
+                const thresh = 120; // Cutoff
+
+                for (let i = 0; i < d.length; i += 4) {
+                    // Alpha thresholding or Luma?
+                    // If knockout, Alpha.
+                    // If solid, Luma.
+                    // Simple Hard Cut
+                    if (d[i + 3] < thresh) d[i + 3] = 0;
+                    else d[i + 3] = 255; // Full binary alpha?
+
+                    // What about Color?
+                    // Provide 'posterize' effect on rgb too?
+                    // Just alpha threshold makes "blobs".
+                    // If we want "Rounded Pixels" inside the image, we need to blur color too?
+                    // Yes, blur mixes colors.
+                    // We need to snap colors back to Palette?
+                    // That's expensive.
+                    // "Rounding" usually softens the harsh dither squares.
+
+                    // Optimized: Just Blur is "Soft Dither".
+                    // Blur + Threshold is "Metaballs".
+
+                    // Ensure full opacity if not knockout
+                    if (!params.knockout) d[i + 3] = 255;
+                }
+                tCtx.putImageData(pData, 0, 0);
+            }
+        }
 
         ctx.imageSmoothingEnabled = false;
         ctx.clearRect(0, 0, width, height);
@@ -132,10 +225,11 @@ export const DitherEffect = {
     },
 
     // --- GPU Support (Only supports Bayer/Ordered/Modulation) ---
-    // If Algorithm is Floyd/Atkinson, we must separate or use CPU fallback.
     isGPUSupported: (params) => {
         const algo = params.algorithm;
-        return (algo === 'none' || algo.startsWith('bayer') || algo === 'modulation' || algo === 'stitched');
+        // Disabled GPU for now as Algo logic significantly diverged. 
+        // Need to update Shaders to match new Thread/Bitwave logic later.
+        return false;
     },
 
     shaderSource: `#version 300 es
@@ -277,19 +371,19 @@ function hexToRgb(hex) {
     ] : [0, 0, 0];
 }
 
-function applyEffectLoop(data, w, h, params, contrastF, palTonal) {
+function applyEffectLoop(data, w, h, params, contrastF, palTonal, activePalette) {
 
     // Choose Algo Type
     const algo = params.algorithm;
 
     if (algo === 'none') {
-        processSimple(data, w, h, params, contrastF, palTonal);
+        processSimple(data, w, h, params, contrastF, palTonal, activePalette);
         return;
     }
 
     // Pattern Based (Bayer, Modulation, Stitched)
-    if (algo.startsWith('bayer') || algo === 'modulation' || algo === 'stitched') {
-        processPattern(data, w, h, params, contrastF, palTonal);
+    if (algo.startsWith('bayer') || ['grid', 'stitched', 'thread', 'bitwave', 'modulation'].includes(algo)) {
+        processPattern(data, w, h, params, contrastF, palTonal, activePalette);
         return;
     }
 
@@ -315,21 +409,21 @@ function applyEffectLoop(data, w, h, params, contrastF, palTonal) {
         ];
     }
 
-    processErrDiff(data, w, h, params, contrastF, palTonal, kernel);
+    processErrDiff(data, w, h, params, contrastF, palTonal, activePalette, kernel);
 }
 
 // === LOGIC HANDLERS ===
 
-function processSimple(data, w, h, params, contrastF, palTonal) {
+function processSimple(data, w, h, params, contrastF, palTonal, activePalette) {
     for (let i = 0; i < data.length; i += 4) {
         let r = data[i], g = data[i + 1], b = data[i + 2];
-        const c = mapColor(r, g, b, params, contrastF, palTonal);
+        const c = mapColor(r, g, b, params, contrastF, palTonal, activePalette);
         data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2];
-        if (params.knockout && isShadow(c, palTonal)) data[i + 3] = 0;
+        if (params.knockout && isShadow(c, palTonal, activePalette)) data[i + 3] = 0;
     }
 }
 
-function processPattern(data, w, h, params, contrastF, palTonal) {
+function processPattern(data, w, h, params, contrastF, palTonal, activePalette) {
     const spread = params.spread || 1.0;
     const algo = params.algorithm;
 
@@ -338,23 +432,25 @@ function processPattern(data, w, h, params, contrastF, palTonal) {
         [0, 8, 2, 10], [12, 4, 14, 6],
         [3, 11, 1, 9], [15, 7, 13, 5]
     ];
-    const map8 = [
-        [0, 48, 12, 60, 3, 51, 15, 63],
-        [32, 16, 44, 28, 35, 19, 47, 31],
-        [8, 56, 4, 52, 11, 59, 7, 55],
-        [40, 24, 36, 20, 43, 27, 39, 23],
-        [2, 50, 14, 62, 1, 49, 13, 61],
-        [34, 18, 46, 30, 33, 17, 45, 29],
-        [10, 58, 6, 54, 9, 57, 5, 53],
-        [42, 26, 38, 22, 41, 25, 37, 21]
-    ];
-    // Stitched Map (Approximation of woven lattice)
-    const mapStitch = [
-        [4, 0, 4, 0],
-        [0, 4, 0, 4],
-        [4, 0, 4, 0],
-        [0, 4, 0, 4]
-    ];
+    const mapContainer = {
+        map4: map4,
+        map8: [
+            [0, 48, 12, 60, 3, 51, 15, 63],
+            [32, 16, 44, 28, 35, 19, 47, 31],
+            [8, 56, 4, 52, 11, 59, 7, 55],
+            [40, 24, 36, 20, 43, 27, 39, 23],
+            [2, 50, 14, 62, 1, 49, 13, 61],
+            [34, 18, 46, 30, 33, 17, 45, 29],
+            [10, 58, 6, 54, 9, 57, 5, 53],
+            [42, 26, 38, 22, 41, 25, 37, 21]
+        ],
+        stitch: [
+            [4, 0, 4, 0], [0, 4, 0, 4], [4, 0, 4, 0], [0, 4, 0, 4]
+        ],
+        thread: [
+            [10, 0, 10, 0], [0, 10, 0, 10], [10, 0, 10, 0], [0, 10, 0, 10]
+        ]
+    };
 
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -364,34 +460,43 @@ function processPattern(data, w, h, params, contrastF, palTonal) {
             // Calc Threshold Bias
             let bias = 0;
 
-            if (algo === 'modulation') {
-                // Sine Wave Pattern
-                // Vertical lines modulated? Or Circular? Usually Frequency Modulation.
-                // Simple version: Horiz Sine
+            if (algo === 'grid') { // Grid Modulation
+                bias = (Math.sin(x * 0.8) + Math.cos(y * 0.8)); // Cross-hatchy
+                bias = bias * 24 * spread;
+            } else if (algo === 'bitwave') { // Bitwave
+                // Use Sine logic but quantified to create "Bits" or steps
+                const wv = Math.sin((x + y) * 0.2) * 5 + Math.cos(x * 0.1) * 3;
+                bias = wv * 8 * spread;
+            } else if (algo === 'modulation') {
                 bias = Math.sin(x * 0.5) * Math.cos(y * 0.5);
-                // Normalize -1 to 1 to dither range
                 bias = bias * 32 * spread;
             } else if (algo === 'stitched') {
-                let m = mapStitch[y % 4][x % 4]; // 0-4
+                let m = mapContainer.stitch[y % 4][x % 4];
                 bias = (m - 2) * 10 * spread;
+            } else if (algo === 'thread') {
+                // Diagonal stripes or Linear lines
+                let m = (x + y) % 4 === 0 ? 8 : -8;
+                bias = m * 2 * spread;
             } else if (algo === 'bayer4') {
-                let m = map4[y % 4][x % 4]; // 0-15
+                let m = mapContainer.map4[y % 4][x % 4];
                 bias = ((m / 16) - 0.5) * 64 * spread;
             } else if (algo === 'bayer8') {
-                let m = map8[y % 8][x % 8]; // 0-63
+                let m = mapContainer.map8[y % 8][x % 8];
                 bias = ((m / 64) - 0.5) * 64 * spread;
             }
 
-            const c = mapColor(r + bias, g + bias, b + bias, params, contrastF, palTonal);
+            const c = mapColor(r + bias, g + bias, b + bias, params, contrastF, palTonal, activePalette);
 
             data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2];
-            if (params.knockout && isShadow(c, palTonal)) data[i + 3] = 0; // Simple knockout
+            if (params.knockout && isShadow(c, palTonal, activePalette)) data[i + 3] = 0;
         }
     }
 }
 
 
-function processErrDiff(data, w, h, params, contrastF, palTonal, kernel) {
+function processErrDiff(data, w, h, params, contrastF, palTonal, activePalette, kernel) {
+    const bleeding = params.bleeding || 0.0;
+
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             const i = (y * w + x) * 4;
@@ -399,18 +504,28 @@ function processErrDiff(data, w, h, params, contrastF, palTonal, kernel) {
             let r = data[i], g = data[i + 1], b = data[i + 2];
 
             // Map Logic returns closest color
-            const c = mapColor(r, g, b, params, contrastF, palTonal);
+            const c = mapColor(r, g, b, params, contrastF, palTonal, activePalette);
 
             data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2];
-            if (params.knockout && isShadow(c, palTonal)) data[i + 3] = 0;
+            if (params.knockout && isShadow(c, palTonal, activePalette)) data[i + 3] = 0;
 
+            // Error Diffusion
             const er = r - c[0];
             const eg = g - c[1];
             const eb = b - c[2];
 
-            // Distribute
+            // If bleeding > 0, we can amplify error or smooth it.
+            // Bleeding usually means ink spreading into neighbors.
+            // In error diffusion, this might mean distributing MORE error or DISTRIBUTING to more pixels.
+            // Simple approach: Amplify error by (1 + bleeding)
+            // Or use a larger kernel?
+            // "Bleed" in ink terms often means blurring. 
+            // In Dither context, maybe it means Random Error?
+            // Let's implement: Error Amplify.
+            const factor = 1.0 + (bleeding * 0.5);
+
             for (let k = 0; k < kernel.length; k++) {
-                distribute(data, x + kernel[k].x, y + kernel[k].y, er, eg, eb, kernel[k].f, w);
+                distribute(data, x + kernel[k].x, y + kernel[k].y, er * factor, eg * factor, eb * factor, kernel[k].f, w);
             }
         }
     }
@@ -418,84 +533,48 @@ function processErrDiff(data, w, h, params, contrastF, palTonal, kernel) {
 
 // === CORE MAPPING ===
 
-function mapColor(r, g, b, params, contrastF, pal) {
-    // 1. Apply Contrast (only in Grade mode? Tonal maps luminance directly)
-    // Actually Contrast helps define edges before dithering in both.
-    if (params.renderMode === 'grade' && contrastF !== 0) {
-        r = factor(r, contrastF);
-        g = factor(g, contrastF);
-        b = factor(b, contrastF);
+function mapColor(r, g, b, params, contrastF, pal, activePalette) {
+    // 1. GRADE MODE
+    if (params.renderMode === 'grade' && activePalette) {
+        // Find Closest in Palette
+        if (params.contrast !== 0) {
+            r = factor(r, contrastF);
+            g = factor(g, contrastF);
+            b = factor(b, contrastF);
+        }
+        return ColorQuantizer.findClosest([r, g, b], activePalette);
     }
 
     // 2. TONAL MODE
     if (params.renderMode === 'tonal') {
-        // Luminance map
         let luma = 0.299 * r + 0.587 * g + 0.114 * b;
 
-        // Clamp input
         if (luma < 0) luma = 0; if (luma > 255) luma = 255;
 
-        // Tri-color mapping: Shadow (0) <-> Mid (128) <-> High (255)
-        // Lerp based on Luma
-        if (luma < 128) {
-            // Shadow -> Mid
-            let t = luma / 128;
+        // Custom Thresholds from Luma Handles
+        const low = pal.lowCut || 60;
+        const high = pal.highCut || 190;
+
+        // Split Range: 0 -> Low (Shadow), Low -> High (Mid), High -> 255 (High)
+
+        if (luma < low) {
+            // Lerp Shadow -> Mid
+            let t = luma / low; // 0 to 1
             return lerpColor(pal.shadow, pal.mid, t);
-        } else {
-            // Mid -> High
-            let t = (luma - 128) / 127;
+        } else if (luma < high) {
+            // Lerp Mid -> High
+            let t = (luma - low) / (high - low);
             return lerpColor(pal.mid, pal.high, t);
-        }
-    }
-
-    // 3. GRADE MODE
-    if (params.renderMode === 'grade') {
-        if (params.colorSpace === 'indexed') {
-            // Indexed Quantization (Poor man's palette generation)
-            // Divide spectrum into N distinct values per channel?
-            // No, "Indexed Colors" usually implies total palette size.
-            // Fast "Posterize" approach:
-
-            // Total colors = params.indexedCount.
-            // We can quantize luminance? No, it's color.
-            // Naive per-channel quantization to fit count^1/3?
-
-            // Improved: Uniform Quantization (Posterize)
-            // Levels = Cbrt(Count)? 
-            // Let's just use strict stepping for R,G,B based on count to simulate palette.
-            // 8 Colors = 2 levels per channel (2x2x2).
-            // 27 Colors = 3 levels.
-            // 64 Colors = 4 levels.
-
-            let levels = Math.floor(Math.pow(params.indexedCount, 1 / 3));
-            if (levels < 2) levels = 2;
-
-            const step = 255 / (levels - 1);
-
-            return [
-                Math.round(r / step) * step,
-                Math.round(g / step) * step,
-                Math.round(b / step) * step
-            ];
         } else {
-            // RGB Mode - Full RGB but maybe dithered?
-            // Just return color, dither engine adds noise/bias before this call usually.
-            // Verify: mapColor is called AFTER adding bias in Pattern modes.
-            // But in Error Diffusion, mapColor is the quantizer.
-
-            // If algorithm is 'floyd' and palette is RGB... error diffusion in RGB?
-            // Usually needs some quantization to make sense (e.g. Web Safe Colors, or 5-bit).
-            // Let's quantize to 5-5-5 (32 levels) for "High Color" dither look.
-
-            const step = 8; // 32 steps
-            return [
-                Math.round(r / step) * step,
-                Math.round(g / step) * step,
-                Math.round(b / step) * step
-            ];
+            // Solid Highlight (or lerp to white if we wanted 4 stops)
+            // Currently just 3 stops: Shadow..Mid..Highlight
+            // If we are above High, we essentially stay at Highlight or push to pure white?
+            // "Highlights" -> pal.high
+            // Actually usually Tone map is gradient. 
+            // If luma > high, we just return pal.high
+            return pal.high;
         }
     }
-
     return [r, g, b];
 }
 
@@ -524,7 +603,11 @@ function factor(v, f) {
 
 function clamp(v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
 
-function isShadow(c, pal) {
-    // Heuristic: Is strict equal to shadow color?
-    return c[0] === pal.shadow[0] && c[1] === pal.shadow[1] && c[2] === pal.shadow[2];
+function isShadow(c, pal, activePalette) {
+    // In Grade mode, we can't easily guess shadow unless we mark it.
+    // In Tonal, pal.shadow is defined.
+    if (pal && pal.shadow) {
+        return c[0] === pal.shadow[0] && c[1] === pal.shadow[1] && c[2] === pal.shadow[2];
+    }
+    return false;
 }
